@@ -310,6 +310,9 @@ st.caption(T("caption"))
 # ───────────────────────────────────────────────
 # Section : Multi-prédictions aléatoires + Heatmap des variations
 # ───────────────────────────────────────────────
+# ───────────────────────────────────────────────
+# Section : Multi-prédictions aléatoires + Heatmap des variations de prix
+# ───────────────────────────────────────────────
 st.subheader("Multi-prédictions aléatoires + Heatmap des variations de prix")
 
 with st.expander("Hyperparamètres (contrôles)", expanded=False):
@@ -320,6 +323,9 @@ with st.expander("Hyperparamètres (contrôles)", expanded=False):
 
 if st.button("Lancer les prédictions multiples + Heatmap"):
 
+    # Sécurité : on déclare explicitement la liste dès le début
+    results = []
+
     if nb_appels < 1 or nb_appels > 5:
         st.error("Le nombre d'appels doit être entre 1 et 5.")
     else:
@@ -327,7 +333,6 @@ if st.button("Lancer les prédictions multiples + Heatmap"):
 
             np.random.seed(seed_aleatoire)
 
-            results = []
             base_params = {
                 "pickup_datetime": pickup_datetime,
                 "pickup_longitude": pickup_longitude,
@@ -338,7 +343,7 @@ if st.button("Lancer les prédictions multiples + Heatmap"):
             }
 
             for i in range(nb_appels):
-                # Copie des paramètres de base
+                # Copie des paramètres de base pour chaque appel
                 p = base_params.copy()
 
                 # Petites perturbations aléatoires
@@ -358,51 +363,63 @@ if st.button("Lancer les prédictions multiples + Heatmap"):
                             "call": i+1,
                             "fare": fare,
                             "passengers": p["passenger_count"],
-                            "pickup_lon": p["pickup_longitude"],
-                            "pickup_lat": p["pickup_latitude"],
-                            "dropoff_lon": p["dropoff_longitude"],
-                            "dropoff_lat": p["dropoff_latitude"],
+                            "pickup_lon": round(p["pickup_longitude"], 6),
+                            "pickup_lat": round(p["pickup_latitude"], 6),
+                            "dropoff_lon": round(p["dropoff_longitude"], 6),
+                            "dropoff_lat": round(p["dropoff_latitude"], 6),
                         })
+
+                except requests.exceptions.RequestException as e:
+                    st.warning(f"Appel {i+1}/{nb_appels} → échec réseau/API : {str(e)}")
                 except Exception as e:
-                    st.warning(f"Appel {i+1} échoué : {str(e)}")
+                    st.warning(f"Appel {i+1}/{nb_appels} → erreur inattendue : {str(e)}")
 
+            # ─── Après la boucle ────────────────────────────────────────
             if not results:
-                st.error("Aucune prédiction valide obtenue.")
+                st.error("Aucune prédiction n'a réussi. Essayez avec moins de variation ou vérifiez l'API.")
             else:
-                st.success(f"{len(results)} prédictions réussies sur {nb_appels} tentatives")
+                st.success(f"{len(results)} prédictions obtenues sur {nb_appels} tentatives")
 
-                # ─── Création d'une petite matrice pour heatmap ───────
-                fares = [r["fare"] for r in results]
-                if len(fares) >= 2:
-                    # On crée une matrice carrée approximative
+                # Création du DataFrame (maintenant sécurisé)
+                df_results = pd.DataFrame(results)
+
+                # Affichage propre avec formatage
+                st.dataframe(
+                    df_results.style.format({
+                        "fare": "${:.2f}",
+                        "pickup_lon": "{:.6f}",
+                        "pickup_lat": "{:.6f}",
+                        "dropoff_lon": "{:.6f}",
+                        "dropoff_lat": "{:.6f}",
+                    }),
+                    use_container_width=True
+                )
+
+                # Heatmap seulement si suffisamment de données
+                if len(results) >= 4:
+                    fares = [r["fare"] for r in results]
+
                     side = int(np.ceil(np.sqrt(len(fares))))
                     pad_len = side * side - len(fares)
                     padded_fares = fares + [np.nan] * pad_len
                     heatmap_data = np.array(padded_fares).reshape(side, side)
 
-                    # Heatmap simple 2D (plus fiable que 3D)
-                    fig, ax = plt.subplots(figsize=(7, 6))
+                    fig, ax = plt.subplots(figsize=(max(5, side * 1.2), max(5, side * 1.2)))
                     im = ax.imshow(heatmap_data, cmap='YlOrRd', interpolation='nearest')
-                    ax.set_title(f"Heatmap des prix prédits\n({len(fares)} valeurs – variations aléatoires)")
+                    ax.set_title(f"Heatmap des prix prédits ({len(fares)} valeurs)")
                     ax.set_xlabel("Index prédiction")
                     ax.set_ylabel("Index prédiction")
                     plt.colorbar(im, ax=ax, label="Prix estimé ($)")
 
-                    # Annotations des valeurs
+                    # Annotations des valeurs (optionnel mais utile)
                     for i in range(side):
                         for j in range(side):
-                            val = heatmap_data[i,j]
+                            val = heatmap_data[i, j]
                             if not np.isnan(val):
-                                text = f"{val:.1f}"
-                                ax.text(j, i, text, ha="center", va="center",
-                                        color="black" if val > np.nanmean(heatmap_data)/2 else "white",
-                                        fontsize=9)
+                                color = "black" if val > np.nanmean(heatmap_data)/2 else "white"
+                                ax.text(j, i, f"{val:.1f}", ha="center", va="center", color=color, fontsize=9)
 
                     st.pyplot(fig)
 
-                    # Tableau récapitulatif
-                    df_results = pd.DataFrame(results)
-                    st.dataframe(df_results.round(4), use_container_width=True)
-
                 else:
-                    st.info("Pas assez de résultats pour produire une heatmap significative.")
+                    st.info("Pas assez de résultats pour produire une heatmap significative (minimum 4 valeurs conseillées).")
