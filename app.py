@@ -46,7 +46,7 @@ with col_d:
 st.subheader("Texte à transformer (mapping sémantique)")
 input_text = st.text_area(
     "Texte original",
-    "Le taxi glisse dans les rues sombres de Manhattan vers un avenir incertain",
+    "If you like to gamble I tell you, I'm your man You win some, lose some It's all the same to me",
     height=90
 )
 
