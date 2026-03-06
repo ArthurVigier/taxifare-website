@@ -495,61 +495,96 @@ if st.button("Lancer les prédictions multiples + Analyses"):
 # ───────────────────────────────────────────────
 # Section : Fractale Mandelbrot centrée sur le trajet
 # ───────────────────────────────────────────────
-st.subheader("Fractale Mandelbrot – Le chaos du trajet")
+# ───────────────────────────────────────────────
+# Section : Fractale Mandelbrot centrée sur une zone intéressante
+# ───────────────────────────────────────────────
+st.subheader("Fractale Mandelbrot – Le chaos inspiré du trajet")
 
-st.caption("On centre la fractale sur les coordonnées moyennes du trajet (plan complexe). Plus le zoom est fort, plus on voit de détails fins.")
+st.caption(
+    "Centre fixe dans une zone riche en détails (pas le gros blob noir). "
+    "Les coordonnées du trajet influencent légèrement le décalage pour garder un lien."
+)
 
-col_zoom, col_iter = st.columns(2)
+col_zoom, col_iter, col_cmap = st.columns(3)
 with col_zoom:
-    zoom_level = st.slider("Niveau de zoom (plus = plus de détails, plus lent)", 1.0, 100.0, 5.0, step=0.5)
+    zoom_level = st.slider("Niveau de zoom", 1.0, 200.0, 8.0, step=0.5)
 with col_iter:
-    max_iter = st.slider("Itérations max (plus = plus précis, plus lent)", 50, 500, 100, step=25)
+    max_iter = st.slider("Itérations max", 50, 800, 120, step=20)
+with col_cmap:
+    cmap_choice = st.selectbox(
+        "Palette de couleurs",
+        ["inferno", "viridis", "plasma", "twilight_shifted", "nipy_spectral", "hot"]
+    )
 
-if st.button("Générer la fractale du trajet"):
+if st.button("Générer la fractale"):
 
-    # Centre : moyenne pickup / dropoff (lat → imag, lon → réel)
-    center_real = (pickup_longitude + dropoff_longitude) / 2
-    center_imag = (pickup_latitude + dropoff_latitude) / 2
+    # Centre fixe dans une zone très détaillée et esthétique
+    # Option 1 : près du "mini-elephant" (très riche)
+    center_real = -0.72689
+    center_imag =  0.188887
+
+    # Option 2 : une autre zone sympa avec beaucoup de spirales
+    # center_real = -0.745 + 0.113
+    # center_imag =  0.113
+
+    # Décalage très léger inspiré des coordonnées GPS (optionnel)
+    # center_real += (pickup_longitude + dropoff_longitude) / 10000
+    # center_imag += (pickup_latitude + dropoff_latitude) / 10000
 
     # Taille du cadre (plus zoom élevé → cadre plus petit)
-    half_size = 0.5 / zoom_level   # ex: zoom 1 → ±0.5, zoom 50 → ±0.01
+    half_size = 1.2 / zoom_level   # 1.2 donne un bon cadrage au départ
 
     x_min = center_real - half_size
     x_max = center_real + half_size
     y_min = center_imag - half_size
     y_max = center_imag + half_size
 
-    width, height = 600, 600   # résolution raisonnable
+    width, height = 700, 700   # résolution confortable
 
-    with st.spinner("Calcul de la fractale en cours... (peut prendre quelques secondes)"):
+    with st.spinner("Calcul de la fractale (quelques secondes)..."):
         try:
-            # Génération Mandelbrot
-            r1 = np.linspace(x_min, x_max, width)
-            r2 = np.linspace(y_min, y_max, height)
-            mandel = np.zeros((height, width))
+            # Grille
+            real = np.linspace(x_min, x_max, width)
+            imag = np.linspace(y_min, y_max, height)
+            X, Y = np.meshgrid(real, imag)
+            c = X + 1j * Y
 
-            for i in range(height):
-                for j in range(width):
-                    c = complex(r1[j], r2[i])
-                    z = 0
-                    n = 0
-                    while abs(z) <= 2 and n < max_iter:
-                        z = z*z + c
-                        n += 1
-                    mandel[i, j] = n
+            # Calcul Mandelbrot vectorisé (beaucoup plus rapide)
+            z = np.zeros_like(c)
+            mandel = np.full(c.shape, max_iter, dtype=int)
+
+            for i in range(max_iter):
+                mask = np.abs(z) <= 2
+                z[mask] = z[mask]**2 + c[mask]
+                mandel[~mask & (mandel == max_iter)] = i
+
+            # Pour les points qui n'ont pas divergé : on les met à 0 ou max_iter
+            mandel[mandel == max_iter] = 0
 
             # Affichage
-            fig, ax = plt.subplots(figsize=(8, 8))
-            ax.imshow(mandel, origin='lower', cmap='hot', extent=[x_min, x_max, y_min, y_max])
-            ax.set_title(f"Mandelbrot autour de ({center_real:.6f}, {center_imag:.6f})\nZoom ×{zoom_level:.1f}")
-            ax.set_xlabel("Partie réelle (longitude)")
-            ax.set_ylabel("Partie imaginaire (latitude)")
+            fig, ax = plt.subplots(figsize=(9, 9))
+            ax.imshow(
+                mandel,
+                origin='lower',
+                cmap=cmap_choice,
+                extent=[x_min, x_max, y_min, y_max],
+                interpolation='bicubic'   # rendu plus doux
+            )
+            ax.set_title(
+                f"Mandelbrot – Zoom ×{zoom_level:.1f} autour de\n"
+                f"({center_real:.6f} + {center_imag:.6f}i)"
+            )
+            ax.set_xlabel("Partie réelle")
+            ax.set_ylabel("Partie imaginaire")
             ax.grid(False)
 
             st.pyplot(fig)
             plt.close(fig)
 
-            st.caption("Noir = points dans l'ensemble de Mandelbrot. Couleurs = vitesse d'échappement.")
+            st.caption(
+                "Noir = points dans l'ensemble (stables). "
+                "Couleurs = vitesse d'échappement (plus clair = plus rapide)."
+            )
 
         except Exception as e:
             st.error(f"Erreur lors du calcul : {str(e)}")
