@@ -311,47 +311,25 @@ st.caption(T("caption"))
 # Section : Multi-prédictions aléatoires + Heatmap des variations
 # ───────────────────────────────────────────────
 # ───────────────────────────────────────────────
-# Section : Multi-prédictions aléatoires + Heatmap des variations de prix
+# Section : Multi-prédictions aléatoires + Graphiques riches
 # ───────────────────────────────────────────────
-# ───────────────────────────────────────────────
-# Section : Multi-prédictions aléatoires + Heatmap des variations de prix
-# ───────────────────────────────────────────────
-st.subheader("Multi-prédictions aléatoires + Heatmap des variations de prix (jusqu'à 20 appels)")
+st.subheader("Multi-prédictions aléatoires + Analyse visuelle des variations")
 
 with st.expander("Hyperparamètres (contrôles)", expanded=True):
-    nb_appels = st.slider(
-        "Nombre d'appels API (max 20)",
-        min_value=1,
-        max_value=20,
-        value=8,
-        step=1
-    )
-    variation_lon_lat = st.slider(
-        "Variation max longitude/latitude (°)",
-        0.0, 0.15, 0.06, step=0.005
-    )
-    variation_pass = st.slider(
-        "Variation max passagers (±)",
-        0, 4, 2
-    )
-    variation_minutes = st.slider(
-        "Variation max sur l'heure (minutes)",
-        0, 90, 30, step=5
-    )
-    seed_aleatoire = st.number_input(
-        "Seed aléatoire (pour reproductibilité)",
-        value=42,
-        step=1
-    )
+    nb_appels = st.slider("Nombre d'appels API (max 20)", 1, 20, 8, step=1)
+    variation_lon_lat = st.slider("Variation max lon/lat (°)", 0.0, 0.15, 0.06, step=0.005)
+    variation_pass = st.slider("Variation max passagers (±)", 0, 4, 2)
+    variation_minutes = st.slider("Variation max sur l'heure (minutes)", 0, 90, 30, step=5)
+    seed_aleatoire = st.number_input("Seed aléatoire", value=42, step=1)
 
-if st.button("Lancer les prédictions multiples + Heatmap"):
+if st.button("Lancer les prédictions multiples + Analyses"):
 
     results = []
 
     if nb_appels < 1 or nb_appels > 20:
-        st.error("Le nombre d'appels doit être entre 1 et 20.")
+        st.error("Nombre d'appels doit être entre 1 et 20.")
     else:
-        with st.spinner(f"Appels API en cours ({nb_appels} prédictions)..."):
+        with st.spinner(f"{nb_appels} prédictions en cours..."):
 
             np.random.seed(seed_aleatoire)
 
@@ -367,24 +345,23 @@ if st.button("Lancer les prédictions multiples + Heatmap"):
             for i in range(nb_appels):
                 p = base_params.copy()
 
-                # Perturbations plus fortes
                 p["pickup_longitude"]  += np.random.uniform(-variation_lon_lat, variation_lon_lat)
                 p["pickup_latitude"]   += np.random.uniform(-variation_lon_lat, variation_lon_lat)
                 p["dropoff_longitude"] += np.random.uniform(-variation_lon_lat, variation_lon_lat)
                 p["dropoff_latitude"]  += np.random.uniform(-variation_lon_lat, variation_lon_lat)
 
-                # Variation passagers
                 p["passenger_count"] = max(1, min(8, p["passenger_count"] + np.random.randint(-variation_pass, variation_pass + 1)))
 
-                # Variation temporelle (décalage en minutes)
+                # Variation temporelle
                 if variation_minutes > 0:
                     try:
+                        from datetime import timedelta
                         dt = datetime.strptime(p["pickup_datetime"], "%Y-%m-%d %H:%M:%S")
                         minutes_offset = np.random.randint(-variation_minutes, variation_minutes + 1)
                         dt_new = dt + timedelta(minutes=minutes_offset)
                         p["pickup_datetime"] = dt_new.strftime("%Y-%m-%d %H:%M:%S")
                     except:
-                        pass  # si format invalide, on garde l'original
+                        pass
 
                 try:
                     resp = requests.get("https://taxifare.lewagon.ai/predict", params=p, timeout=8)
@@ -404,24 +381,30 @@ if st.button("Lancer les prédictions multiples + Heatmap"):
                             "datetime": p["pickup_datetime"],
                         })
 
-                except requests.exceptions.RequestException as e:
-                    st.caption(f"Appel {i+1} → échec réseau : {str(e)[:60]}...")
                 except Exception as e:
-                    st.caption(f"Appel {i+1} → erreur : {str(e)[:60]}...")
+                    st.caption(f"Appel {i+1} → échec : {str(e)[:70]}...")
 
-            # ─── Résultats ────────────────────────────────────────
+            # ─── Résultats et visualisations ───────────────────────────────
             if not results:
-                st.error("Aucune prédiction valide récupérée.")
+                st.error("Aucune prédiction valide obtenue.")
             else:
                 st.success(f"{len(results)} prédictions réussies sur {nb_appels} tentatives")
 
                 import pandas as pd
 
-                df_results = pd.DataFrame(results)
+                df = pd.DataFrame(results)
 
+                # Calcul distance approximative (km)
+                df['distance_km'] = np.hypot(
+                    df['dropoff_lon'] - df['pickup_lon'],
+                    df['dropoff_lat'] - df['pickup_lat']
+                ) * 111
+
+                st.subheader("Tableau des prédictions")
                 st.dataframe(
-                    df_results.style.format({
+                    df.style.format({
                         "fare": "${:.2f}",
+                        "distance_km": "{:.2f} km",
                         "pickup_lon": "{:.6f}",
                         "pickup_lat": "{:.6f}",
                         "dropoff_lon": "{:.6f}",
@@ -430,20 +413,82 @@ if st.button("Lancer les prédictions multiples + Heatmap"):
                     use_container_width=True
                 )
 
-                # Heatmap si suffisamment de données
+                # ─── Graphique 1 : Scatter 3D ───────────────────────────────
+                st.subheader("Prix vs Distance vs Passagers (3D)")
+                if len(df) >= 3:
+                    fig3d = plt.figure(figsize=(10, 8))
+                    ax = fig3d.add_subplot(111, projection='3d')
+                    scatter = ax.scatter(
+                        df['distance_km'], df['passengers'], df['fare'],
+                        c=df['fare'], cmap='viridis', s=120, alpha=0.85, edgecolor='black'
+                    )
+                    ax.set_xlabel('Distance approx. (km)')
+                    ax.set_ylabel('Passagers')
+                    ax.set_zlabel('Prix ($)')
+                    fig3d.colorbar(scatter, ax=ax, label='Prix ($)', shrink=0.6, aspect=30)
+                    st.pyplot(fig3d)
+                    plt.close(fig3d)
+
+                # ─── Graphique 2 : Carte st.map ─────────────────────────────
+                st.subheader("Carte des trajets perturbés (centre moyen)")
+                if len(df) >= 2:
+                    df_map = df.copy()
+                    df_map['lat'] = (df_map['pickup_lat'] + df_map['dropoff_lat']) / 2
+                    df_map['lon'] = (df_map['pickup_lon'] + df_map['dropoff_lon']) / 2
+                    st.map(
+                        df_map,
+                        latitude='lat',
+                        longitude='lon',
+                        size='fare',
+                        color='fare',
+                        zoom=11
+                    )
+
+                # ─── Graphique 3 : Violin plot par passagers ────────────────
+                st.subheader("Distribution des prix par nombre de passagers")
+                if len(df) >= 5:
+                    import seaborn as sns
+                    fig_violin, ax_v = plt.subplots(figsize=(9, 6))
+                    sns.violinplot(
+                        data=df,
+                        x='passengers',
+                        y='fare',
+                        palette='Set2',
+                        inner='quartile',
+                        ax=ax_v
+                    )
+                    ax_v.set_xlabel('Nombre de passagers')
+                    ax_v.set_ylabel('Prix estimé ($)')
+                    ax_v.grid(True, alpha=0.2, axis='y')
+                    st.pyplot(fig_violin)
+                    plt.close(fig_violin)
+
+                # ─── Graphique 4 : Scatter Prix vs Distance coloré ──────────
+                st.subheader("Prix en fonction de la distance (couleur = passagers)")
+                if len(df) >= 4:
+                    fig_scatter, ax_s = plt.subplots(figsize=(10, 6))
+                    sc = ax_s.scatter(
+                        df['distance_km'], df['fare'],
+                        c=df['passengers'], s=120, cmap='tab20b', alpha=0.9, edgecolor='white'
+                    )
+                    ax_s.set_xlabel('Distance approx. (km)')
+                    ax_s.set_ylabel('Prix prédit ($)')
+                    ax_s.grid(True, alpha=0.3)
+                    plt.colorbar(sc, ax=ax_s, label='Passagers')
+                    st.pyplot(fig_scatter)
+                    plt.close(fig_scatter)
+
+                # Heatmap classique (optionnelle, conservée)
                 if len(results) >= 4:
-                    fares = [r["fare"] for r in results]
+                    st.subheader("Heatmap des prix prédits")
+                    fares = df['fare'].tolist()
                     side = int(np.ceil(np.sqrt(len(fares))))
-                    pad_len = side * side - len(fares)
-                    padded = fares + [np.nan] * pad_len
+                    padded = fares + [np.nan] * (side**2 - len(fares))
                     heatmap_data = np.array(padded).reshape(side, side)
 
-                    fig, ax = plt.subplots(figsize=(max(6, side*1.3), max(6, side*1.3)))
-                    im = ax.imshow(heatmap_data, cmap='viridis', interpolation='nearest')
-                    ax.set_title(f"Heatmap des {len(fares)} prix prédits")
-                    plt.colorbar(im, ax=ax, label="Prix ($)")
-                    st.pyplot(fig)
-                    plt.close(fig)
-
-                else:
-                    st.info("Pas assez de résultats pour une heatmap utile.")
+                    fig_hm, ax_hm = plt.subplots(figsize=(max(6, side*1.3), max(6, side*1.3)))
+                    im = ax_hm.imshow(heatmap_data, cmap='viridis', interpolation='nearest')
+                    ax_hm.set_title(f"Heatmap des {len(fares)} prix")
+                    plt.colorbar(im, ax=ax_hm, label="$")
+                    st.pyplot(fig_hm)
+                    plt.close(fig_hm)
