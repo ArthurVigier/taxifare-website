@@ -307,58 +307,53 @@ if st.button(T("button_predict"), type="primary"):
 # Get Random Information
 # ───────────────────────────────────────────────
 if st.button(T("button_random_info")):
-    with st.spinner("Recherche Google en cours..."):
-        numbers = [pickup_longitude, pickup_latitude, dropoff_longitude, dropoff_latitude, passenger_count]
+    with st.spinner("Recherche Google sur la suite de chiffres..."):
+        numbers = [
+            pickup_longitude,
+            pickup_latitude,
+            dropoff_longitude,
+            dropoff_latitude,
+            passenger_count
+        ]
         if 'fare' in locals():
             numbers.append(fare)
         if 'dist_km' in locals():
             numbers.append(dist_km)
 
-        letter_string = numbers_to_letters(numbers)
-        st.write(f"Chaîne de lettres générée : **{letter_string}**")
+        digit_string = extract_numbers_as_string(numbers)
+        st.write(f"Suite de chiffres extraite : **{digit_string}**")
 
-        closest = difflib.get_close_matches(letter_string, WORD_DICT, n=1, cutoff=0.2)
-        query_word = closest[0] if closest else "taxi"
+        if not digit_string or len(digit_string) < 3:
+            st.warning("Pas assez de chiffres pour une recherche utile.")
+            st.stop()
 
-        st.write(f"Mot le plus proche trouvé : **{query_word}**")
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-        # Recherche Google (User-Agent pour éviter blocage simple)
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        google_url = f"https://www.google.com/search?q={query_word.replace(' ', '+')}"
-
-        try:
-            resp = requests.get(google_url, headers=headers, timeout=8)
-            resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "html.parser")
-
-            # On cherche le premier lien organique (pas pub, pas "People also ask", etc.)
-            first_link = None
-            for g in soup.find_all("div", class_="g"):
-                a_tag = g.find("a")
-                if a_tag and "href" in a_tag.attrs:
-                    href = a_tag["href"]
-                    if href.startswith("http") and "google" not in href and "youtube" not in href:
-                        first_link = href
-                        break
-
-            if not first_link:
-                st.warning("Aucun résultat organique clair trouvé sur Google.")
-                first_link = "https://www.google.com/search?q=" + query_word.replace(" ", "+")
-
-            st.markdown(f"**Premier résultat organique Google** : [{query_word}]({first_link})")
-
-            # On va chercher ~200 premiers mots du contenu
+        # ─── Fonction réutilisable pour chercher un terme et récupérer le premier lien + contenu ───
+        def search_and_extract(query):
+            google_url = f"https://www.google.com/search?q={query}"
             try:
+                resp = requests.get(google_url, headers=headers, timeout=8)
+                resp.raise_for_status()
+                soup = BeautifulSoup(resp.text, "html.parser")
+
+                first_link = None
+                for g in soup.find_all("div", class_="g"):
+                    a_tag = g.find("a")
+                    if a_tag and "href" in a_tag.attrs:
+                        href = a_tag["href"]
+                        if href.startswith("http") and "google" not in href and "youtube" not in href:
+                            first_link = href
+                            break
+
+                if not first_link:
+                    return None, None
+
+                # Extraction contenu
                 page_resp = requests.get(first_link, headers=headers, timeout=8)
                 page_soup = BeautifulSoup(page_resp.text, "html.parser")
 
-                # Extraction naïve : titre + meta description + premiers paragraphes
-                title = page_soup.title.string.strip() if page_soup.title else query_word
-                meta_desc = page_soup.find("meta", attrs={"name": "description"})
-                desc = meta_desc["content"].strip()[:300] if meta_desc else ""
-
+                title = page_soup.title.string.strip() if page_soup.title else query
                 paragraphs = page_soup.find_all("p")
                 text_snippet = ""
                 for p in paragraphs:
@@ -366,20 +361,55 @@ if st.button(T("button_random_info")):
                     if len(text_snippet) > 1200:
                         break
 
-                # Limite ~200 mots
                 words = text_snippet.split()
                 preview = " ".join(words[:200]) + "..." if len(words) > 200 else text_snippet
 
-                st.subheader(T("random_info_title"))
-                st.markdown(f"**{title}**")
-                st.markdown(f"_{desc}_" if desc else "")
-                st.markdown(preview)
-                st.markdown(f"[Lire la page complète →]({first_link})")
+                return first_link, (title, preview)
 
-            except Exception as e:
-                st.info(f"Impossible de lire le contenu de la page ({str(e)}). Lien direct : {first_link}")
+            except:
+                return None, None
 
-        except Exception as e:
-            st.error(f"Erreur lors de la recherche Google : {str(e)}")
+        # ─── Essai 1 : recherche avec la chaîne complète ───
+        link, content = search_and_extract(digit_string)
+        used_query = digit_string
+
+        # ─── Si rien de pertinent → division en sous-ensembles ───
+        if not link or not content:
+            st.info("Aucun résultat pertinent sur la suite complète → division en sous-ensembles...")
+
+            # Division en morceaux de 3 à 6 chiffres
+            chunk_sizes = [3, 4, 5, 6]
+            possible_chunks = []
+
+            for size in chunk_sizes:
+                for i in range(0, len(digit_string) - size + 1):
+                    chunk = digit_string[i:i+size]
+                    if len(chunk.strip("0")) >= 3:  # évite les suites de zéros
+                        possible_chunks.append(chunk)
+
+            # On prend le premier chunk viable
+            if possible_chunks:
+                chunk_query = possible_chunks[0]
+                st.write(f"Essai avec le sous-ensemble : **{chunk_query}**")
+                link, content = search_and_extract(chunk_query)
+                used_query = chunk_query
+            else:
+                st.warning("Impossible de créer un sous-ensemble exploitable.")
+                link = f"https://www.google.com/search?q={digit_string}"
+                content = (None, "Aucun contenu extrait.")
+
+        # ─── Affichage final ───
+        if link:
+            st.markdown(f"**Recherche effectuée** : [{used_query}]({link})")
+
+        if content and content[0]:
+            title, preview = content
+            st.subheader(T("random_info_title"))
+            st.markdown(f"**{title}**")
+            st.markdown(preview)
+            st.markdown(f"[Ouvrir la page complète →]({link})")
+        else:
+            st.info("Aucun contenu significatif récupéré. Essayez avec d'autres coordonnées.")
+            st.markdown(f"Lien de recherche brute : [Google →]({link})")
 
 st.caption(T("caption"))
