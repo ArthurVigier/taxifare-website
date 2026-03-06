@@ -313,21 +313,43 @@ st.caption(T("caption"))
 # ───────────────────────────────────────────────
 # Section : Multi-prédictions aléatoires + Heatmap des variations de prix
 # ───────────────────────────────────────────────
-st.subheader("Multi-prédictions aléatoires + Heatmap des variations de prix")
+# ───────────────────────────────────────────────
+# Section : Multi-prédictions aléatoires + Heatmap des variations de prix
+# ───────────────────────────────────────────────
+st.subheader("Multi-prédictions aléatoires + Heatmap des variations de prix (jusqu'à 20 appels)")
 
-with st.expander("Hyperparamètres (contrôles)", expanded=False):
-    nb_appels = st.slider("Nombre d'appels API (max 5)", 1, 5, 3)
-    variation_lon_lat = st.slider("Variation max longitude/latitude (°)", 0.0, 0.05, 0.015, step=0.001)
-    variation_pass = st.slider("Variation max passagers", 0, 3, 1)
-    seed_aleatoire = st.number_input("Seed aléatoire (pour reproductibilité)", value=42, step=1)
+with st.expander("Hyperparamètres (contrôles)", expanded=True):
+    nb_appels = st.slider(
+        "Nombre d'appels API (max 20)",
+        min_value=1,
+        max_value=20,
+        value=8,
+        step=1
+    )
+    variation_lon_lat = st.slider(
+        "Variation max longitude/latitude (°)",
+        0.0, 0.15, 0.06, step=0.005
+    )
+    variation_pass = st.slider(
+        "Variation max passagers (±)",
+        0, 4, 2
+    )
+    variation_minutes = st.slider(
+        "Variation max sur l'heure (minutes)",
+        0, 90, 30, step=5
+    )
+    seed_aleatoire = st.number_input(
+        "Seed aléatoire (pour reproductibilité)",
+        value=42,
+        step=1
+    )
 
 if st.button("Lancer les prédictions multiples + Heatmap"):
 
-    # Sécurité : on déclare explicitement la liste dès le début
     results = []
 
-    if nb_appels < 1 or nb_appels > 5:
-        st.error("Le nombre d'appels doit être entre 1 et 5.")
+    if nb_appels < 1 or nb_appels > 20:
+        st.error("Le nombre d'appels doit être entre 1 et 20.")
     else:
         with st.spinner(f"Appels API en cours ({nb_appels} prédictions)..."):
 
@@ -343,20 +365,32 @@ if st.button("Lancer les prédictions multiples + Heatmap"):
             }
 
             for i in range(nb_appels):
-                # Copie des paramètres de base pour chaque appel
                 p = base_params.copy()
 
-                # Petites perturbations aléatoires
+                # Perturbations plus fortes
                 p["pickup_longitude"]  += np.random.uniform(-variation_lon_lat, variation_lon_lat)
                 p["pickup_latitude"]   += np.random.uniform(-variation_lon_lat, variation_lon_lat)
                 p["dropoff_longitude"] += np.random.uniform(-variation_lon_lat, variation_lon_lat)
                 p["dropoff_latitude"]  += np.random.uniform(-variation_lon_lat, variation_lon_lat)
-                p["passenger_count"]    = max(1, min(8, p["passenger_count"] + np.random.randint(-variation_pass, variation_pass + 1)))
+
+                # Variation passagers
+                p["passenger_count"] = max(1, min(8, p["passenger_count"] + np.random.randint(-variation_pass, variation_pass + 1)))
+
+                # Variation temporelle (décalage en minutes)
+                if variation_minutes > 0:
+                    try:
+                        dt = datetime.strptime(p["pickup_datetime"], "%Y-%m-%d %H:%M:%S")
+                        minutes_offset = np.random.randint(-variation_minutes, variation_minutes + 1)
+                        dt_new = dt + timedelta(minutes=minutes_offset)
+                        p["pickup_datetime"] = dt_new.strftime("%Y-%m-%d %H:%M:%S")
+                    except:
+                        pass  # si format invalide, on garde l'original
 
                 try:
-                    resp = requests.get("https://taxifare.lewagon.ai/predict", params=p, timeout=6)
+                    resp = requests.get("https://taxifare.lewagon.ai/predict", params=p, timeout=8)
                     resp.raise_for_status()
-                    fare = resp.json().get("fare", None)
+                    data = resp.json()
+                    fare = data.get("fare")
 
                     if fare is not None:
                         results.append({
@@ -367,23 +401,24 @@ if st.button("Lancer les prédictions multiples + Heatmap"):
                             "pickup_lat": round(p["pickup_latitude"], 6),
                             "dropoff_lon": round(p["dropoff_longitude"], 6),
                             "dropoff_lat": round(p["dropoff_latitude"], 6),
+                            "datetime": p["pickup_datetime"],
                         })
 
                 except requests.exceptions.RequestException as e:
-                    st.warning(f"Appel {i+1}/{nb_appels} → échec réseau/API : {str(e)}")
+                    st.caption(f"Appel {i+1} → échec réseau : {str(e)[:60]}...")
                 except Exception as e:
-                    st.warning(f"Appel {i+1}/{nb_appels} → erreur inattendue : {str(e)}")
+                    st.caption(f"Appel {i+1} → erreur : {str(e)[:60]}...")
 
-            # ─── Après la boucle ────────────────────────────────────────
+            # ─── Résultats ────────────────────────────────────────
             if not results:
-                st.error("Aucune prédiction n'a réussi. Essayez avec moins de variation ou vérifiez l'API.")
+                st.error("Aucune prédiction valide récupérée.")
             else:
-                st.success(f"{len(results)} prédictions obtenues sur {nb_appels} tentatives")
+                st.success(f"{len(results)} prédictions réussies sur {nb_appels} tentatives")
 
-                # Création du DataFrame (maintenant sécurisé)
+                import pandas as pd
+
                 df_results = pd.DataFrame(results)
 
-                # Affichage propre avec formatage
                 st.dataframe(
                     df_results.style.format({
                         "fare": "${:.2f}",
@@ -395,31 +430,20 @@ if st.button("Lancer les prédictions multiples + Heatmap"):
                     use_container_width=True
                 )
 
-                # Heatmap seulement si suffisamment de données
+                # Heatmap si suffisamment de données
                 if len(results) >= 4:
                     fares = [r["fare"] for r in results]
-
                     side = int(np.ceil(np.sqrt(len(fares))))
                     pad_len = side * side - len(fares)
-                    padded_fares = fares + [np.nan] * pad_len
-                    heatmap_data = np.array(padded_fares).reshape(side, side)
+                    padded = fares + [np.nan] * pad_len
+                    heatmap_data = np.array(padded).reshape(side, side)
 
-                    fig, ax = plt.subplots(figsize=(max(5, side * 1.2), max(5, side * 1.2)))
-                    im = ax.imshow(heatmap_data, cmap='YlOrRd', interpolation='nearest')
-                    ax.set_title(f"Heatmap des prix prédits ({len(fares)} valeurs)")
-                    ax.set_xlabel("Index prédiction")
-                    ax.set_ylabel("Index prédiction")
-                    plt.colorbar(im, ax=ax, label="Prix estimé ($)")
-
-                    # Annotations des valeurs (optionnel mais utile)
-                    for i in range(side):
-                        for j in range(side):
-                            val = heatmap_data[i, j]
-                            if not np.isnan(val):
-                                color = "black" if val > np.nanmean(heatmap_data)/2 else "white"
-                                ax.text(j, i, f"{val:.1f}", ha="center", va="center", color=color, fontsize=9)
-
+                    fig, ax = plt.subplots(figsize=(max(6, side*1.3), max(6, side*1.3)))
+                    im = ax.imshow(heatmap_data, cmap='viridis', interpolation='nearest')
+                    ax.set_title(f"Heatmap des {len(fares)} prix prédits")
+                    plt.colorbar(im, ax=ax, label="Prix ($)")
                     st.pyplot(fig)
+                    plt.close(fig)
 
                 else:
-                    st.info("Pas assez de résultats pour produire une heatmap significative (minimum 4 valeurs conseillées).")
+                    st.info("Pas assez de résultats pour une heatmap utile.")
