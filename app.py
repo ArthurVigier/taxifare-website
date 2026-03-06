@@ -110,6 +110,15 @@ with col_btn2:
         st.session_state.current_texts = TEXTS_NORMAL.copy()
         st.rerun()
 
+st.markdown(
+    """
+    <small style="color: #777; font-style: italic;">
+    • « Take & Modify Text Full » → remplace tous les titres, labels, descriptions et boutons par leur version transformée (César + substitutions + inversions)<br>
+    • « Go back to normal » → rétablit immédiatement l'interface en français standard
+    </small>
+    """,
+    unsafe_allow_html=True
+)
 # ───────────────────────────────────────────────
 # Raccourci pour texte actuel
 # ───────────────────────────────────────────────
