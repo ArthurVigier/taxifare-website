@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 from datetime import datetime
+import difflib  # for pattern matching / closest word
 
 st.set_page_config(page_title="TaxiFare + Game of Life", layout="wide")
 
@@ -48,6 +49,8 @@ Cette application combine :
     "error_no_fare": "Impossible de lire le prix depuis l'API.",
     "error_generic": "Erreur : {error}",
     "caption": "TaxiFare + Game of Life procédural • déterministe via paramètres du trajet • 2025–2026",
+    "button_random_info": "Get Random Information",
+    "random_info_title": "Information aléatoire issue des params",
 }
 
 # ───────────────────────────────────────────────
@@ -110,15 +113,6 @@ with col_btn2:
         st.session_state.current_texts = TEXTS_NORMAL.copy()
         st.rerun()
 
-st.markdown(
-    """
-    <small style="color: #777; font-style: italic;">
-    • « Take & Modify Text Full » → remplace tous les titres, labels, descriptions et boutons par leur version transformée (César + substitutions + inversions)<br>
-    • « Go back to normal » → rétablit immédiatement l'interface en français standard
-    </small>
-    """,
-    unsafe_allow_html=True
-)
 # ───────────────────────────────────────────────
 # Raccourci pour texte actuel
 # ───────────────────────────────────────────────
@@ -165,6 +159,31 @@ def count_neighbors(grid):
 def gol_step(grid):
     neighbors = count_neighbors(grid)
     return ((neighbors == 3) | ((grid == 1) & (neighbors == 2))).astype(int)
+
+# ───────────────────────────────────────────────
+# Dictionnaire de mots simples pour pattern matching (peut être étendu)
+# ───────────────────────────────────────────────
+WORD_DICT = [
+    "taxi", "newyork", "manhattan", "airport", "fare", "traffic", "city", "night", "passenger", "route",
+    "latitude", "longitude", "time", "date", "weekend", "hour", "distance", "duration", "price", "estimate",
+    "python", "streamlit", "api", "wikipedia", "random", "info", "letter", "number", "convert", "match",
+    "hello", "world", "test", "data", "code", "app", "button", "click", "fun", "art",
+    # Ajoute plus de mots si besoin, ou charge d'un fichier / lib
+]
+
+# ───────────────────────────────────────────────
+# Fonction pour convertir chiffres en lettres
+# ───────────────────────────────────────────────
+def numbers_to_letters(numbers):
+    letters = ""
+    for num in numbers:
+        # Convertir en string, enlever signe et point, prendre digits
+        str_num = str(abs(num)).replace(".", "")
+        for digit in str_num:
+            if digit.isdigit():
+                # 0=A, 1=B, ..., 9=J (mod 26 si plus grand, mais digits 0-9)
+                letters += chr(ord('A') + int(digit))
+    return letters.lower()  # pour matching insensible à la casse
 
 # ───────────────────────────────────────────────
 # Interface principale
@@ -305,5 +324,48 @@ if st.button(T("button_predict"), type="primary"):
 
         except Exception as e:
             st.error(T("error_generic").format(error=str(e)))
+
+# ───────────────────────────────────────────────
+# Nouveau bouton "Get Random Information"
+# ───────────────────────────────────────────────
+if st.button(T("button_random_info")):
+    with st.spinner("Génération d'info aléatoire..."):
+        # Collecter les chiffres (long, lat, pass, dist si calculé, etc.)
+        # Note : fare et dist nécessitent la prédiction, donc on assume qu'elle a été faite ou on utilise defaults
+        numbers = [pickup_longitude, pickup_latitude, dropoff_longitude, dropoff_latitude, passenger_count]
+        # Ajoute fare si disponible
+        if 'fare' in locals():
+            numbers.append(fare)
+        if 'dist_km' in locals():
+            numbers.append(dist_km)
+
+        # Convertir en lettres
+        letter_string = numbers_to_letters(numbers)
+        st.write(f"Chaîne de lettres générée : {letter_string}")
+
+        # Pattern matching : trouver le mot le plus proche dans WORD_DICT
+        closest = difflib.get_close_matches(letter_string, WORD_DICT, n=1, cutoff=0.3)
+        if closest:
+            query_word = closest[0]
+        else:
+            query_word = "random"  # default si pas de match
+
+        st.write(f"Mot le plus proche : {query_word}")
+
+        # Requête Wikipedia
+        wiki_url = f"https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&format=json&titles={query_word}"
+        try:
+            resp = requests.get(wiki_url)
+            data = resp.json()
+            page = next(iter(data['query']['pages'].values()))
+            if 'extract' in page:
+                info = page['extract']
+            else:
+                info = "Pas d'info trouvée."
+        except:
+            info = "Erreur lors de la requête Wikipedia."
+
+        st.subheader(T("random_info_title"))
+        st.markdown(info)
 
 st.caption(T("caption"))
