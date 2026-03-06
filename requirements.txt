@@ -7,3 +7,4 @@ beautifulsoup4>=4.12     # bs4 → beautifulsoup4 (nom officiel PyPI)
 pillow>=10.0             # nécessaire pour matplotlib.animation + GIF
 numpy>=1.24              # dépendance implicite mais souvent utile de l'expliciter
 pillow>=10.0.0
+seaborn

@@ -440,7 +440,6 @@ if st.button("Lancer les prédictions multiples + Analyses"):
                         latitude='lat',
                         longitude='lon',
                         size='fare',
-                        color='fare',
                         zoom=11
                     )
 
