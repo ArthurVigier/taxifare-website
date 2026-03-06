@@ -106,15 +106,11 @@ if st.button("Predict Fare → Show Views"):
             current = np.array([dist, duration_min, passenger_count, fare, hour, is_weekend, delta_lat, delta_lon])
 
             # ─── Compute PCA (use sklearn if avail, else manual) ───
-            try:
-                pca = PCA(n_components=3)
-                pcs = pca.fit_transform(typical_rides)
-                curr_pcs = pca.transform(current.reshape(1, -1))[0]
-                explained_var = pca.explained_variance_ratio_
-            except ImportError:
-                pcs, components = manual_pca(typical_rides, 3)
-                curr_pcs = (current - np.mean(typical_rides, axis=0)) @ components
-                explained_var = [0.5, 0.3, 0.2]  # approx
+
+
+            pcs, components = manual_pca(typical_rides, 3)
+            curr_pcs = (current - np.mean(typical_rides, axis=0)) @ components
+            explained_var = [0.5, 0.3, 0.2]  # approx
 
             # ─── 2D View (as before, first two PCs) ──────────
             fig2d, ax2d = plt.subplots(figsize=(7, 5.5))
