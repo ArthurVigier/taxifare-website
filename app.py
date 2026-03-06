@@ -307,3 +307,80 @@ if st.button(T("button_predict"), type="primary"):
             st.error(T("error_generic").format(error=str(e)))
 
 st.caption(T("caption"))
+# ───────────────────────────────────────────────
+# Nouvelle section simplifiée : Heatmap 3D + Export
+# ───────────────────────────────────────────────
+st.subheader("Heatmap 3D du différentiel + Export simple")
+
+if st.button("Générer visualisation & dataset"):
+
+    try:
+        # 1. Deux sous-ensembles simples
+        mid = len(typical_rides) // 2
+        subset1 = typical_rides[:mid]
+        subset2 = typical_rides[mid:]
+
+        # 2. Différentiel moyen par feature
+        diff_mean = np.mean(subset1, axis=0) - np.mean(subset2, axis=0)
+
+        # 3. Grille 2D très simple pour heatmap (répétition + léger lissage)
+        grid_size = 16
+        base = np.abs(diff_mean)[:8]  # on prend les 8 premières features
+        grid = np.outer(base, np.linspace(0.3, 1.2, grid_size))
+        grid += np.random.normal(0, 0.05, grid.shape)  # micro bruit
+
+        # 4. Mini évolution CA (juste 3 pas – très léger)
+        for _ in range(3):
+            neighbors = count_neighbors(grid > np.mean(grid))
+            grid = ((neighbors == 3) | ((grid > np.mean(grid)) & (neighbors == 2))).astype(float)
+
+        # 5. Heatmap 3D statique (pas d'animation pour éviter bugs)
+        fig = plt.figure(figsize=(9, 7))
+        ax = fig.add_subplot(111, projection='3d')
+
+        X, Y = np.meshgrid(np.arange(grid_size), np.arange(grid_size))
+        surf = ax.plot_surface(X, Y, grid, cmap='viridis', linewidth=0, antialiased=False)
+
+        ax.set_title("Heatmap 3D – Différentiel features + mini CA")
+        ax.set_xlabel("Dimension grille")
+        ax.set_ylabel("Dimension grille")
+        ax.set_zlabel("Valeur évoluée")
+        fig.colorbar(surf, ax=ax, shrink=0.6)
+
+        st.pyplot(fig)
+
+        # 6. Export CSV + ZIP ultra simple
+        import pandas as pd
+        import io
+        import zipfile
+
+        df = pd.DataFrame(
+            typical_rides,
+            columns=['dist_km', 'duration_min', 'passengers', 'fare', 'hour', 'weekend', 'delta_lat', 'delta_lon']
+        )
+        # Ajout de la ligne actuelle si disponible
+        try:
+            current_row = pd.Series(current_features, index=df.columns)
+            df = pd.concat([df, current_row.to_frame().T], ignore_index=True)
+        except:
+            pass  # si current_features pas défini, on passe
+
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False)
+        csv_data = csv_buffer.getvalue().encode('utf-8')
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("taxi_dataset.csv", csv_data)
+
+        zip_buffer.seek(0)
+
+        st.download_button(
+            label="Télécharger ZIP (dataset.csv)",
+            data=zip_buffer,
+            file_name="taxi_heatmap_dataset.zip",
+            mime="application/zip"
+        )
+
+    except Exception as e:
+        st.error(f"Problème dans la génération : {str(e)}")
