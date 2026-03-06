@@ -50,7 +50,7 @@ with col_d:
 st.subheader("Texte à transformer")
 input_text = st.text_area(
     "Texte original",
-    "Has he lost his mind? Can he see, or is he blind? Can he walk at all? Or if he moves, will he fall? ",
+    "Un taxi traverse la nuit new-yorkaise, entre lumières et ombres, vers un destin incertain...",
     height=100
 )
 
