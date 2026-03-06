@@ -321,7 +321,7 @@ st.subheader("Multi-prédictions aléatoires + Analyse visuelle des variations (
 with st.expander("Hyperparamètres (contrôles)", expanded=True):
     nb_appels = st.slider(
         "Nombre d'appels API (max 30 maintenant)",
-        min_value=1, max_value=300, value=10, step=1
+        min_value=1, max_value=30, value=10, step=1
     )
 
     variation_km = st.slider(
