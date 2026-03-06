@@ -316,49 +316,42 @@ st.caption(T("caption"))
 # ───────────────────────────────────────────────
 # Section : Multi-prédictions aléatoires + Analyse visuelle des variations
 # ───────────────────────────────────────────────
-# ───────────────────────────────────────────────
-# Section : Multi-prédictions aléatoires + Analyse visuelle (variance EXTRÊME)
-# ───────────────────────────────────────────────
-st.subheader("Multi-prédictions aléatoires – Variance extrême (jusqu'à ~150 km)")
+st.subheader("Multi-prédictions aléatoires + Analyse visuelle des variations (variance large)")
 
-with st.expander("Hyperparamètres (contrôles – variance poussée !)", expanded=True):
+with st.expander("Hyperparamètres (contrôles)", expanded=True):
     nb_appels = st.slider(
-        "Nombre d'appels API (modéré conseillé)",
-        min_value=1, max_value=25, value=8, step=1
+        "Nombre d'appels API (max 30 maintenant)",
+        min_value=1, max_value=30, value=10, step=1
     )
 
-    variation_km_max = st.slider(
-        "Variation maximale de distance (km)",
-        0.0, 150.0, 40.0, step=5.0,
-        help="Contrôle l'étirement/réduction du trajet + offset aléatoire. 100+ km = prix très variables"
+    variation_km = st.slider(
+        "Variation max de la distance (km)",
+        0.0, 30.0, 8.0, step=0.5, help="Contrôle la dispersion réelle des trajets"
     )
 
     variation_pass = st.slider(
         "Variation max passagers (±)",
-        0, 7, 4
+        0, 7, 3
     )
 
-    variation_hours = st.slider(
-        "Variation max sur le jour/heure (heures)",
-        0, 72, 24, step=4,
-        help="Décalage jusqu'à 3 jours avant/après"
+    variation_minutes = st.slider(
+        "Variation max sur l'heure (minutes)",
+        0, 180, 60, step=10
     )
 
     seed_aleatoire = st.number_input(
-        "Seed aléatoire", value=42, step=1
+        "Seed aléatoire (pour reproductibilité)",
+        value=42, step=1
     )
 
-if st.button("Lancer les prédictions multiples + Analyses (variance extrême)"):
+if st.button("Lancer les prédictions multiples + Analyses"):
 
     results = []
 
-    if nb_appels > 15:
-        st.warning("Attention : plus de 15 appels peut être lent et risquer des limites d'API")
-
-    if nb_appels < 1 or nb_appels > 25:
-        st.error("Nombre d'appels entre 1 et 25.")
+    if nb_appels < 1 or nb_appels > 30:
+        st.error("Nombre d'appels entre 1 et 30.")
     else:
-        with st.spinner(f"{nb_appels} prédictions extrêmes en cours... (certains trajets très longs possibles)"):
+        with st.spinner(f"{nb_appels} prédictions en cours... (certains trajets peuvent être longs)"):
 
             np.random.seed(seed_aleatoire)
 
@@ -371,7 +364,7 @@ if st.button("Lancer les prédictions multiples + Analyses (variance extrême)")
                 "passenger_count": int(passenger_count),
             }
 
-            # Vecteur de base
+            # ─── Calcul d'un vecteur directionnel moyen (pour simuler des variations de distance) ───
             delta_lon_base = dropoff_longitude - pickup_longitude
             delta_lat_base = dropoff_latitude - pickup_latitude
             dist_base_km = np.hypot(delta_lon_base, delta_lat_base) * 111
@@ -379,38 +372,35 @@ if st.button("Lancer les prédictions multiples + Analyses (variance extrême)")
             for i in range(nb_appels):
                 p = base_params.copy()
 
-                # 1. Variation extrême de distance
-                if variation_km_max > 0:
-                    # Facteur d'étirement (peut aller de 0.05 à 5+ selon variation_km_max)
-                    scale_factor = np.random.uniform(
-                        max(0.05, 1 - variation_km_max / (2 * dist_base_km)),
-                        1 + variation_km_max / dist_base_km if dist_base_km > 0 else 3.0
-                    )
+                # 1. Variation importante de distance (en km)
+                if variation_km > 0:
+                    scale_factor = np.random.uniform(0.2, 1.0 + variation_km / dist_base_km if dist_base_km > 0 else 1.0)
+                    # On étire ou rétrécit le vecteur directionnel
                     p["dropoff_longitude"] = pickup_longitude + delta_lon_base * scale_factor
                     p["dropoff_latitude"]  = pickup_latitude  + delta_lat_base * scale_factor
 
-                # 2. Offset directionnel aléatoire puissant (jusqu'à variation_km_max)
-                angle_offset = np.random.uniform(-np.pi, np.pi)  # direction totalement aléatoire
-                dist_offset_km = np.random.uniform(0, variation_km_max)
-                p["dropoff_longitude"] += (dist_offset_km / 111) * np.cos(angle_offset)
-                p["dropoff_latitude"]  += (dist_offset_km / 111) * np.sin(angle_offset)
+                # 2. Décalage angulaire / direction aléatoire supplémentaire (pour vraiment varier)
+                angle_offset = np.random.uniform(-np.pi/3, np.pi/3)  # ±60°
+                dist_offset_km = np.random.uniform(0, variation_km)
+                p["dropoff_longitude"] += dist_offset_km / 111 * np.cos(angle_offset)
+                p["dropoff_latitude"]  += dist_offset_km / 111 * np.sin(angle_offset)
 
                 # 3. Passagers
                 p["passenger_count"] = max(1, min(8, p["passenger_count"] + np.random.randint(-variation_pass, variation_pass + 1)))
 
-                # 4. Variation temporelle extrême (jusqu'à 3 jours)
-                if variation_hours > 0:
+                # 4. Variation temporelle (jusqu'à 3h)
+                if variation_minutes > 0:
                     try:
                         from datetime import timedelta
                         dt = datetime.strptime(p["pickup_datetime"], "%Y-%m-%d %H:%M:%S")
-                        hours_offset = np.random.randint(-variation_hours * 2, variation_hours * 2 + 1)
-                        dt_new = dt + timedelta(hours=hours_offset)
+                        minutes_offset = np.random.randint(-variation_minutes, variation_minutes + 1)
+                        dt_new = dt + timedelta(minutes=minutes_offset)
                         p["pickup_datetime"] = dt_new.strftime("%Y-%m-%d %H:%M:%S")
                     except:
                         pass
 
                 try:
-                    resp = requests.get("https://taxifare.lewagon.ai/predict", params=p, timeout=12)
+                    resp = requests.get("https://taxifare.lewagon.ai/predict", params=p, timeout=10)
                     resp.raise_for_status()
                     data = resp.json()
                     fare = data.get("fare")
@@ -425,10 +415,6 @@ if st.button("Lancer les prédictions multiples + Analyses (variance extrême)")
                             "dropoff_lon": round(p["dropoff_longitude"], 6),
                             "dropoff_lat": round(p["dropoff_latitude"], 6),
                             "datetime": p["pickup_datetime"],
-                            "distance_km": np.hypot(
-                                p["dropoff_lon"] - p["pickup_lon"],
-                                p["dropoff_lat"] - p["pickup_lat"]
-                            ) * 111
                         })
 
                 except Exception as e:
@@ -444,7 +430,13 @@ if st.button("Lancer les prédictions multiples + Analyses (variance extrême)")
 
                 df = pd.DataFrame(results)
 
-                st.subheader("Tableau des prédictions (extrêmes)")
+                # Distance en km (plus précise maintenant)
+                df['distance_km'] = np.hypot(
+                    df['dropoff_lon'] - df['pickup_lon'],
+                    df['dropoff_lat'] - df['pickup_lat']
+                ) * 111
+
+                st.subheader("Tableau des prédictions")
                 st.dataframe(
                     df.style.format({
                         "fare": "${:.2f}",
@@ -457,71 +449,74 @@ if st.button("Lancer les prédictions multiples + Analyses (variance extrême)")
                     use_container_width=True
                 )
 
-                # ─── Graphique 1 : Scatter 3D extrême ───────────────────────────────
-                st.subheader("Prix vs Distance vs Passagers (3D – variance extrême)")
+                # ─── Graphique 1 : Scatter 3D ───────────────────────────────
+                st.subheader("Prix vs Distance vs Passagers (3D)")
                 if len(df) >= 3:
-                    fig3d = plt.figure(figsize=(12, 9))
+                    fig3d = plt.figure(figsize=(10, 8))
                     ax = fig3d.add_subplot(111, projection='3d')
                     scatter = ax.scatter(
                         df['distance_km'], df['passengers'], df['fare'],
-                        c=df['fare'], cmap='plasma', s=150, alpha=0.9, edgecolor='black'
+                        c=df['fare'], cmap='viridis', s=120, alpha=0.85, edgecolor='black'
                     )
                     ax.set_xlabel('Distance (km)')
                     ax.set_ylabel('Passagers')
                     ax.set_zlabel('Prix ($)')
-                    fig3d.colorbar(scatter, ax=ax, label='Prix ($)')
+                    fig3d.colorbar(scatter, ax=ax, label='Prix ($)', shrink=0.6)
                     st.pyplot(fig3d)
                     plt.close(fig3d)
 
-                # ─── Graphique 2 : Carte (zoom adapté à la grande variance) ────────
-                st.subheader("Carte des trajets perturbés (grande dispersion)")
+                # ─── Graphique 2 : Carte st.map ─────────────────────────────
+                st.subheader("Carte des trajets perturbés")
                 if len(df) >= 2:
                     df_map = df.copy()
                     df_map['lat'] = (df_map['pickup_lat'] + df_map['dropoff_lat']) / 2
                     df_map['lon'] = (df_map['pickup_lon'] + df_map['dropoff_lon']) / 2
-                    # Zoom dynamique selon la dispersion
-                    lat_range = df_map['lat'].max() - df_map['lat'].min()
-                    zoom_level = max(8, 12 - lat_range * 20)  # ajuste selon dispersion
-                    st.map(df_map, latitude='lat', longitude='lon', size='fare', zoom=zoom_level)
+                    st.map(
+                        df_map,
+                        latitude='lat',
+                        longitude='lon',
+                        size='fare',
+                        zoom=10   # zoom un peu plus large car variance km augmentée
+                    )
 
-                # ─── Graphique 3 : Violin extrême ──────────────────────────────────
-                st.subheader("Distribution des prix par passagers (variance extrême)")
+                # ─── Graphique 3 : Violin plot par passagers ────────────────
+                st.subheader("Distribution des prix par nombre de passagers")
                 if len(df) >= 5:
                     import seaborn as sns
-                    fig_v, ax_v = plt.subplots(figsize=(10, 6))
-                    sns.violinplot(data=df, x='passengers', y='fare', palette='Set3', inner='quartile', ax=ax_v)
+                    fig_v, ax_v = plt.subplots(figsize=(9, 6))
+                    sns.violinplot(data=df, x='passengers', y='fare', palette='Set2', inner='quartile', ax=ax_v)
                     ax_v.set_xlabel('Passagers')
                     ax_v.set_ylabel('Prix ($)')
-                    ax_v.grid(True, alpha=0.3, axis='y')
+                    ax_v.grid(True, alpha=0.2, axis='y')
                     st.pyplot(fig_v)
                     plt.close(fig_v)
 
-                # ─── Graphique 4 : Scatter Prix vs Distance ────────────────────────
-                st.subheader("Prix vs Distance (couleur = passagers)")
+                # ─── Graphique 4 : Scatter Prix vs Distance coloré ──────────
+                st.subheader("Prix en fonction de la distance (couleur = passagers)")
                 if len(df) >= 4:
-                    fig_s, ax_s = plt.subplots(figsize=(12, 7))
+                    fig_s, ax_s = plt.subplots(figsize=(10, 6))
                     sc = ax_s.scatter(
                         df['distance_km'], df['fare'],
-                        c=df['passengers'], s=180, cmap='tab20c', alpha=0.95, edgecolor='white', linewidth=1
+                        c=df['passengers'], s=140, cmap='tab20b', alpha=0.9, edgecolor='white'
                     )
-                    ax_s.set_xlabel('Distance réelle (km)')
+                    ax_s.set_xlabel('Distance (km)')
                     ax_s.set_ylabel('Prix prédit ($)')
-                    ax_s.grid(True, alpha=0.4)
+                    ax_s.grid(True, alpha=0.3)
                     plt.colorbar(sc, ax=ax_s, label='Passagers')
                     st.pyplot(fig_s)
                     plt.close(fig_s)
 
-                # Heatmap (seulement si beaucoup de données)
-                if len(results) >= 8:
-                    st.subheader("Heatmap des prix (vue globale)")
+                # Heatmap (optionnelle)
+                if len(results) >= 6:
+                    st.subheader("Heatmap des prix prédits")
                     fares = df['fare'].tolist()
                     side = int(np.ceil(np.sqrt(len(fares))))
                     padded = fares + [np.nan] * (side**2 - len(fares))
                     heatmap_data = np.array(padded).reshape(side, side)
 
-                    fig_hm, ax_hm = plt.subplots(figsize=(max(8, side*1.5), max(8, side*1.5)))
-                    im = ax_hm.imshow(heatmap_data, cmap='magma', interpolation='nearest')
-                    ax_hm.set_title(f"Heatmap des {len(fares)} prix extrêmes")
+                    fig_hm, ax_hm = plt.subplots(figsize=(max(7, side*1.4), max(7, side*1.4)))
+                    im = ax_hm.imshow(heatmap_data, cmap='viridis', interpolation='nearest')
+                    ax_hm.set_title(f"Heatmap des {len(fares)} prix")
                     plt.colorbar(im, ax=ax_hm, label="$")
                     st.pyplot(fig_hm)
                     plt.close(fig_hm)
