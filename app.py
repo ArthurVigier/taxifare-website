@@ -491,3 +491,65 @@ if st.button("Lancer les prédictions multiples + Analyses"):
                     plt.colorbar(im, ax=ax_hm, label="$")
                     st.pyplot(fig_hm)
                     plt.close(fig_hm)
+
+# ───────────────────────────────────────────────
+# Section : Fractale Mandelbrot centrée sur le trajet
+# ───────────────────────────────────────────────
+st.subheader("Fractale Mandelbrot – Le chaos du trajet")
+
+st.caption("On centre la fractale sur les coordonnées moyennes du trajet (plan complexe). Plus le zoom est fort, plus on voit de détails fins.")
+
+col_zoom, col_iter = st.columns(2)
+with col_zoom:
+    zoom_level = st.slider("Niveau de zoom (plus = plus de détails, plus lent)", 1.0, 100.0, 5.0, step=0.5)
+with col_iter:
+    max_iter = st.slider("Itérations max (plus = plus précis, plus lent)", 50, 500, 100, step=25)
+
+if st.button("Générer la fractale du trajet"):
+
+    # Centre : moyenne pickup / dropoff (lat → imag, lon → réel)
+    center_real = (pickup_longitude + dropoff_longitude) / 2
+    center_imag = (pickup_latitude + dropoff_latitude) / 2
+
+    # Taille du cadre (plus zoom élevé → cadre plus petit)
+    half_size = 0.5 / zoom_level   # ex: zoom 1 → ±0.5, zoom 50 → ±0.01
+
+    x_min = center_real - half_size
+    x_max = center_real + half_size
+    y_min = center_imag - half_size
+    y_max = center_imag + half_size
+
+    width, height = 600, 600   # résolution raisonnable
+
+    with st.spinner("Calcul de la fractale en cours... (peut prendre quelques secondes)"):
+        try:
+            # Génération Mandelbrot
+            r1 = np.linspace(x_min, x_max, width)
+            r2 = np.linspace(y_min, y_max, height)
+            mandel = np.zeros((height, width))
+
+            for i in range(height):
+                for j in range(width):
+                    c = complex(r1[j], r2[i])
+                    z = 0
+                    n = 0
+                    while abs(z) <= 2 and n < max_iter:
+                        z = z*z + c
+                        n += 1
+                    mandel[i, j] = n
+
+            # Affichage
+            fig, ax = plt.subplots(figsize=(8, 8))
+            ax.imshow(mandel, origin='lower', cmap='hot', extent=[x_min, x_max, y_min, y_max])
+            ax.set_title(f"Mandelbrot autour de ({center_real:.6f}, {center_imag:.6f})\nZoom ×{zoom_level:.1f}")
+            ax.set_xlabel("Partie réelle (longitude)")
+            ax.set_ylabel("Partie imaginaire (latitude)")
+            ax.grid(False)
+
+            st.pyplot(fig)
+            plt.close(fig)
+
+            st.caption("Noir = points dans l'ensemble de Mandelbrot. Couleurs = vitesse d'échappement.")
+
+        except Exception as e:
+            st.error(f"Erreur lors du calcul : {str(e)}")
