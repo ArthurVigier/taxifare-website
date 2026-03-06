@@ -5,69 +5,131 @@ import matplotlib.pyplot as plt
 import time
 from datetime import datetime
 
-st.set_page_config(page_title="TaxiFare + Game of Life Art", layout="wide")
+st.set_page_config(page_title="TaxiFare + Game of Life", layout="wide")
 
-st.title("Taxi Fare Prediction + Conway's Game of Life Art")
-st.markdown("""
+# ───────────────────────────────────────────────
+# Textes de base (version normale)
+# ───────────────────────────────────────────────
+TEXTS_NORMAL = {
+    "app_title": "Prédiction Taxi + Game of Life Art",
+    "app_desc": """
 Cette application combine :
 • Prédiction du prix d'un trajet taxi (API Le Wagon)
 • Visualisation PCA 2D/3D des caractéristiques du trajet
 • Transformation stylée du texte
 • **Animation Game of Life 2D** initialisée à partir des paramètres du trajet
-""")
+""",
+    "section_trajet": "Paramètres du trajet",
+    "pickup_datetime_label": "Date et heure prise en charge",
+    "pickup_lon_label": "Longitude prise en charge",
+    "pickup_lat_label": "Latitude prise en charge",
+    "dropoff_lon_label": "Longitude dépose",
+    "dropoff_lat_label": "Latitude dépose",
+    "passengers_label": "Nombre de passagers",
+    "section_controls": "Contrôles visuels",
+    "anim_speed_label": "Vitesse (s par génération)",
+    "grid_size_label": "Taille de la grille",
+    "zoom_label": "Zoom affichage",
+    "gens_label": "Nombre max générations",
+    "section_text": "Texte à transformer",
+    "text_placeholder": "Un taxi traverse la nuit new-yorkaise, entre lumières et ombres, vers un destin incertain...",
+    "button_predict": "Prédire + Visualiser + Animer Game of Life",
+    "button_modify_full": "Take & Modify Text Full",
+    "button_reset": "Go back to normal",
+    "pca_2d_title": "PCA 2D",
+    "pca_3d_title": "PCA 3D",
+    "transformed_title": "Texte transformé",
+    "gol_title": "Game of Life 2D – Animation procédurale",
+    "fare_success": "**Prix estimé : ${fare:.2f}**",
+    "gol_info": "Grille {size} × {size} • Densité initiale ≈ {density:.1%}",
+    "gol_gen_caption": "État à la génération {gen}",
+    "gol_gen_title": "Génération {gen} / {max_gens}   –   {alive} cellules vivantes",
+    "success_end": "Simulation terminée. Relancez pour une nouvelle évolution !",
+    "error_no_fare": "Impossible de lire le prix depuis l'API.",
+    "error_generic": "Erreur : {error}",
+    "caption": "TaxiFare + Game of Life procédural • déterministe via paramètres du trajet • 2025–2026",
+}
 
 # ───────────────────────────────────────────────
-#  Inputs trajet
+# État de l'application
 # ───────────────────────────────────────────────
-st.subheader("Paramètres du trajet")
+if "modified_mode" not in st.session_state:
+    st.session_state.modified_mode = False
 
-col1, col2 = st.columns([4, 4])
-with col1:
-    pickup_datetime   = st.text_input("Date et heure",          "2014-07-06 19:18:00")
-    pickup_longitude  = st.number_input("Longitude prise en charge", value=-73.950655,  step=0.0001, format="%.6f")
-    pickup_latitude   = st.number_input("Latitude prise en charge",  value=40.783282,   step=0.0001, format="%.6f")
-with col2:
-    dropoff_longitude = st.number_input("Longitude dépose", value=-73.984365,  step=0.0001, format="%.6f")
-    dropoff_latitude  = st.number_input("Latitude dépose",  value=40.769802,   step=0.0001, format="%.6f")
-    passenger_count   = st.number_input("Passagers",        value=1, min_value=1, max_value=8, step=1)
+if "current_texts" not in st.session_state:
+    st.session_state.current_texts = TEXTS_NORMAL.copy()
 
 # ───────────────────────────────────────────────
-# Contrôles visuels & animation
+# Fonction de transformation du texte (basée sur les règles précédentes)
 # ───────────────────────────────────────────────
-st.subheader("Contrôles visuels")
+def transform_text(text: str) -> str:
+    if not text:
+        return text
 
-col_a, col_b, col_c, col_d = st.columns(4)
-with col_a:
-    anim_speed = st.slider("Vitesse (s par génération)", 0.04, 0.9, 0.16, step=0.02)
-with col_b:
-    grid_size = st.slider("Taille de la grille", 48, 96, 72, step=4)
-with col_c:
-    zoom_factor = st.slider("Zoom affichage", 0.7, 2.8, 1.45, step=0.1)
-with col_d:
-    max_gens = st.slider("Nombre max générations", 50, 220, 120, step=10)
+    # Shift César basé sur longueur
+    shift = (len(text) % 26) + 1
+    result = []
+    for idx, c in enumerate(text.lower()):
+        if c.isalpha():
+            # César
+            base = ord('a')
+            shifted = chr((ord(c) - base + shift) % 26 + base)
+            # Substitution lettre → chiffre si condition
+            if (idx + shift) % 7 == 0:
+                num = (ord(shifted) - ord('a') + 1) % 10
+                result.append(str(num))
+            else:
+                result.append(shifted)
+        else:
+            result.append(c)
 
-# Texte à transformer
-st.subheader("Texte à transformer")
-input_text = st.text_area(
-    "Texte original",
-    "Un taxi traverse la nuit new-yorkaise, entre lumières et ombres, vers un destin incertain...",
-    height=100
-)
+    s = "".join(result).upper()
+
+    # Inversion partielle de segments (tous les 5-8 chars)
+    flip_freq = 5 + (len(s) % 4)
+    parts = [s[i:i+flip_freq] for i in range(0, len(s), flip_freq)]
+    for i in range(len(parts)):
+        if i % 2 == 1:
+            parts[i] = parts[i][::-1]
+    return "".join(parts)
 
 # ───────────────────────────────────────────────
-# Données typiques pour PCA (features : dist, dur, pass, fare, hour, wknd, dlat, dlon)
+# Boutons de contrôle (toujours visibles)
+# ───────────────────────────────────────────────
+col_btn1, col_btn2 = st.columns([1, 1])
+with col_btn1:
+    if st.button(TEXTS_NORMAL["button_modify_full"], type="primary", key="modify_full"):
+        st.session_state.modified_mode = True
+        for key, val in TEXTS_NORMAL.items():
+            st.session_state.current_texts[key] = transform_text(val)
+        st.rerun()
+
+with col_btn2:
+    if st.button(TEXTS_NORMAL["button_reset"], key="reset_normal"):
+        st.session_state.modified_mode = False
+        st.session_state.current_texts = TEXTS_NORMAL.copy()
+        st.rerun()
+
+# ───────────────────────────────────────────────
+# Raccourci pour texte actuel
+# ───────────────────────────────────────────────
+def T(key: str) -> str:
+    return st.session_state.current_texts.get(key, key)
+
+# ───────────────────────────────────────────────
+# Données typiques pour PCA
 # ───────────────────────────────────────────────
 typical_rides = np.array([
-    [ 1.8,   8,   1,  10,   12,   0,  0.01, -0.02],
-    [ 4.2,  14,   1,  18,   18,   0,  0.03, -0.04],
-    [ 8.5,  25,   2,  32,    8,   0,  0.05, -0.07],
-    [12.0,  35,   1,  45,   22,   1,  0.08, -0.10],
-    [20.0,  55,   4,  65,    7,   0,  0.15, -0.18],
-    [ 2.5,  11,   3,  14,   14,   0,  0.02, -0.03],
-    [ 0.9,   5,   1,   7,   23,   1,  0.005,-0.01],
-    [ 3.1,  12,   2,  15,   10,   0, -0.02,  0.03],
-    [ 6.4,  20,   1,  25,   16,   0,  0.04,  0.05],
-    [15.0,  40,   3,  50,    9,   1, -0.10,  0.12],
+    [1.8, 8, 1, 10, 12, 0, 0.01, -0.02],
+    [4.2, 14, 1, 18, 18, 0, 0.03, -0.04],
+    [8.5, 25, 2, 32, 8, 0, 0.05, -0.07],
+    [12.0, 35, 1, 45, 22, 1, 0.08, -0.10],
+    [20.0, 55, 4, 65, 7, 0, 0.15, -0.18],
+    [2.5, 11, 3, 14, 14, 0, 0.02, -0.03],
+    [0.9, 5, 1, 7, 23, 1, 0.005, -0.01],
+    [3.1, 12, 2, 15, 10, 0, -0.02, 0.03],
+    [6.4, 20, 1, 25, 16, 0, 0.04, 0.05],
+    [15.0, 40, 3, 50, 9, 1, -0.10, 0.12],
 ])
 
 def manual_pca(X, n_components=3):
@@ -79,10 +141,9 @@ def manual_pca(X, n_components=3):
     return X_c @ comp, comp
 
 # ───────────────────────────────────────────────
-# Game of Life functions
+# Fonctions Game of Life
 # ───────────────────────────────────────────────
 def count_neighbors(grid):
-    """Compte les voisins (bords toriques)"""
     return (
         np.roll(grid, 1, 0) + np.roll(grid, -1, 0) +
         np.roll(grid, 1, 1) + np.roll(grid, -1, 1) +
@@ -94,17 +155,45 @@ def count_neighbors(grid):
 
 def gol_step(grid):
     neighbors = count_neighbors(grid)
-    birth = (neighbors == 3)
-    survive = (grid == 1) & ((neighbors == 2) | (neighbors == 3))
-    return np.logical_or(birth, survive).astype(int)
+    return ((neighbors == 3) | ((grid == 1) & (neighbors == 2))).astype(int)
 
 # ───────────────────────────────────────────────
-# BOUTON PRINCIPAL
+# Interface principale
 # ───────────────────────────────────────────────
-if st.button("Prédire + Visualiser + Animer Game of Life", type="primary"):
+st.title(T("app_title"))
+st.markdown(T("app_desc"))
+
+st.subheader(T("section_trajet"))
+
+col1, col2 = st.columns([4, 4])
+with col1:
+    pickup_datetime = st.text_input(T("pickup_datetime_label"), "2014-07-06 19:18:00")
+    pickup_longitude = st.number_input(T("pickup_lon_label"), value=-73.950655, step=0.0001, format="%.6f")
+    pickup_latitude = st.number_input(T("pickup_lat_label"), value=40.783282, step=0.0001, format="%.6f")
+with col2:
+    dropoff_longitude = st.number_input(T("dropoff_lon_label"), value=-73.984365, step=0.0001, format="%.6f")
+    dropoff_latitude = st.number_input(T("dropoff_lat_label"), value=40.769802, step=0.0001, format="%.6f")
+    passenger_count = st.number_input(T("passengers_label"), value=1, min_value=1, max_value=8, step=1)
+
+st.subheader(T("section_controls"))
+
+col_a, col_b, col_c, col_d = st.columns(4)
+with col_a:
+    anim_speed = st.slider(T("anim_speed_label"), 0.04, 0.9, 0.16, step=0.02)
+with col_b:
+    grid_size = st.slider(T("grid_size_label"), 48, 96, 72, step=4)
+with col_c:
+    zoom_factor = st.slider(T("zoom_label"), 0.7, 2.8, 1.45, step=0.1)
+with col_d:
+    max_gens = st.slider(T("gens_label"), 50, 220, 120, step=10)
+
+st.subheader(T("section_text"))
+input_text = st.text_area(T("section_text"), T("text_placeholder"), height=100)
+
+if st.button(T("button_predict"), type="primary"):
     with st.spinner("Calcul en cours..."):
         try:
-            # ─── API call ────────────────────────────────────────
+            # ─── API ─────────────────────────────────────────────
             params = {
                 "pickup_datetime": pickup_datetime,
                 "pickup_longitude": float(pickup_longitude),
@@ -117,12 +206,12 @@ if st.button("Prédire + Visualiser + Animer Game of Life", type="primary"):
             response.raise_for_status()
             fare = response.json().get("fare")
             if fare is None:
-                st.error("Impossible de lire le prix depuis l'API.")
+                st.error(T("error_no_fare"))
                 st.stop()
 
-            st.success(f"**Prix estimé : ${fare:.2f}**")
+            st.success(T("fare_success").format(fare=fare))
 
-            # ─── Features pour seed & densité ────────────────────
+            # ─── Features ────────────────────────────────────────
             lon1, lat1 = pickup_longitude, pickup_latitude
             lon2, lat2 = dropoff_longitude, dropoff_latitude
             dist_km = np.hypot(lon2 - lon1, lat2 - lat1) * 111
@@ -139,7 +228,7 @@ if st.button("Prédire + Visualiser + Animer Game of Life", type="primary"):
             d_lat = lat2 - lat1
             d_lon = lon2 - lon1
 
-            # Seed global déterministe
+            # Seed déterministe
             seed_value = int(dist_km * 17 + fare * 31 + hour_frac * 13 + passenger_count * 101 + d_lat*999 + d_lon*777)
             np.random.seed(seed_value % 2**32)
 
@@ -151,65 +240,61 @@ if st.button("Prédire + Visualiser + Animer Game of Life", type="primary"):
             col_pca1, col_pca2 = st.columns(2)
             with col_pca1:
                 fig, ax = plt.subplots(figsize=(5.5, 4.5))
-                ax.scatter(pcs[:,0], pcs[:,1], c="lightgray", label="trajets typiques")
-                ax.scatter(curr_proj[0], curr_proj[1], c="crimson", s=220, marker="*", label="ce trajet")
+                ax.scatter(pcs[:,0], pcs[:,1], c="lightgray", label="typique")
+                ax.scatter(curr_proj[0], curr_proj[1], c="crimson", s=220, marker="*")
                 ax.legend()
-                ax.set_title("PCA 2D")
+                ax.set_title(T("pca_2d_title"))
                 st.pyplot(fig)
 
             with col_pca2:
                 fig3 = plt.figure(figsize=(5.5, 4.5))
                 ax3 = fig3.add_subplot(111, projection='3d')
-                ax3.scatter(pcs[:,0], pcs[:,1], pcs[:,2], c="lightgray", s=30)
+                ax3.scatter(pcs[:,0], pcs[:,1], pcs[:,2], c="lightgray")
                 ax3.scatter(*curr_proj[:3], c="red", s=180, marker="*")
-                ax3.set_title("PCA 3D")
+                ax3.set_title(T("pca_3d_title"))
                 st.pyplot(fig3)
 
             # ─── Texte transformé ────────────────────────────────
-            st.subheader("Texte transformé")
-            shift = int(fare * 5 + dist_km * 7) % 26
-            transformed = "".join(
-                chr((ord(c) - 97 + shift) % 26 + 97) if c.islower() else c
-                for c in input_text.lower()
-            )
+            st.subheader(T("transformed_title"))
+            transformed = transform_text(input_text)
             st.code(transformed)
 
-            # ─── Game of Life 2D Animation ───────────────────────
-            st.subheader("Game of Life 2D – Animation procédurale")
+            # ─── Game of Life ────────────────────────────────────
+            st.subheader(T("gol_title"))
 
             density = 0.14 + (fare / 120) * 0.15 + (dist_km / 60) * 0.09 + (passenger_count / 8) * 0.06
             density = np.clip(density, 0.08, 0.48)
 
             grid = (np.random.rand(grid_size, grid_size) < density).astype(int)
 
-            # Petit motif si conditions particulières
+            # Ajout motif si conditions
             if passenger_count >= 4 or is_weekend:
                 cx = grid_size // 2
                 glider = np.array([[0,1,0],[0,0,1],[1,1,1]])
                 grid[cx:cx+3, cx-5:cx-2] = glider
 
-            st.markdown(f"Grille **{grid_size} × {grid_size}**  •  Densité initiale ≈ **{density:.1%}**")
+            st.markdown(T("gol_info").format(size=grid_size, density=density))
 
             placeholder = st.empty()
-
             current = grid.copy()
 
-            for generation in range(max_gens):
+            for generation in range(1, max_gens + 1):
                 current = gol_step(current)
+                alive = np.sum(current)
 
                 with placeholder.container():
                     fig, ax = plt.subplots(figsize=(10 * zoom_factor, 10 * zoom_factor))
                     ax.imshow(current, cmap="binary", interpolation="nearest")
-                    ax.set_title(f"Génération {generation+1} / {max_gens}   –   {np.sum(current)} cellules vivantes")
+                    ax.set_title(T("gol_gen_title").format(gen=generation, max_gens=max_gens, alive=alive))
                     ax.axis("off")
                     st.pyplot(fig)
-                    st.caption(f"État à la génération {generation+1}")
+                    st.caption(T("gol_gen_caption").format(gen=generation))
 
                 time.sleep(anim_speed)
 
-            st.success("Simulation terminée. Relancez pour une nouvelle évolution !")
+            st.success(T("success_end"))
 
         except Exception as e:
-            st.error(f"Erreur : {str(e)}")
+            st.error(T("error_generic").format(error=str(e)))
 
-st.caption("TaxiFare + Game of Life procédural • déterministe via paramètres du trajet • 2025–2026")
+st.caption(T("caption"))
