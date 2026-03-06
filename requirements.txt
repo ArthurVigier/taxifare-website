@@ -3,3 +3,5 @@ pandas
 requests
 matplotlib
 bs4
+io
+mpl_toolkits

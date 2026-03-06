@@ -4,7 +4,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 from datetime import datetime
-
+from mpl_toolkits.mplot3d import Axes3D
+import matplotlib.animation as animation
+from io import BytesIO
 st.set_page_config(page_title="TaxiFare + Game of Life", layout="wide")
 
 # ───────────────────────────────────────────────
@@ -307,3 +309,67 @@ if st.button(T("button_predict"), type="primary"):
             st.error(T("error_generic").format(error=str(e)))
 
 st.caption(T("caption"))
+
+# ───────────────────────────────────────────────
+# Nouvelle section : Visualisation Heatmap 3D Animée + Export Dataset
+# (À insérer après la partie Game of Life, par ex. après st.success(T("success_end")))
+# ───────────────────────────────────────────────
+st.subheader("Visualisation Heatmap 3D Animée + Export Dataset")
+
+# Deux subsets (ex: première moitié vs seconde des typical_rides)
+subset1 = typical_rides[:len(typical_rides)//2]
+subset2 = typical_rides[len(typical_rides)//2:]
+
+# Modélisation différentiel (différence moyenne par feature)
+diff = np.mean(subset1, axis=0) - np.mean(subset2, axis=0)
+
+# Automate cellulaire simple sur une grille basée sur diff (ex: binarisée)
+ca_grid = (np.outer(diff, np.linspace(0, 1, 20)) > 0).astype(int)  # grille 8x20 approx
+for _ in range(5):  # évoluer 5 steps
+    ca_grid = gol_step(ca_grid.T).T  # réutilise gol_step, assume 2D CA
+
+# Heatmap 3D : surface plot avec rotation animée
+
+
+fig_3d = plt.figure(figsize=(8, 6))
+ax = fig_3d.add_subplot(111, projection='3d')
+
+X, Y = np.meshgrid(np.arange(ca_grid.shape[1]), np.arange(ca_grid.shape[0]))
+surf = ax.plot_surface(X, Y, ca_grid, cmap='viridis', edgecolor='none')
+ax.set_title("Heatmap 3D du Différentiel Évolué (CA)")
+ax.set_xlabel("Features")
+ax.set_ylabel("Steps")
+ax.set_zlabel("Valeur")
+
+def rotate(angle):
+    ax.view_init(azim=angle)
+
+buf = BytesIO()
+ani = animation.FuncAnimation(fig_3d, rotate, frames=np.arange(0, 360, 5), interval=100)
+ani.save(buf, format='gif', writer='pillow')
+buf.seek(0)
+st.image(buf, use_column_width=True, caption="Animation rotation 3D Heatmap")
+
+# Génération CSV + ZIP export
+import pandas as pd
+import zipfile
+
+if st.button("Générer & Télécharger Dataset ZIP"):
+    df = pd.DataFrame(typical_rides, columns=['dist', 'dur', 'pass', 'fare', 'hour', 'wknd', 'dlat', 'dlon'])
+    df.loc[len(df)] = current_features  # ajout current
+
+    csv_buf = BytesIO()
+    df.to_csv(csv_buf, index=False)
+    csv_buf.seek(0)
+
+    zip_buf = BytesIO()
+    with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('dataset.csv', csv_buf.getvalue())
+    zip_buf.seek(0)
+
+    st.download_button(
+        label="Télécharger ZIP",
+        data=zip_buf,
+        file_name="dataset_taxi.zip",
+        mime="application/zip"
+    )
