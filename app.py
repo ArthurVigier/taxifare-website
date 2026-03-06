@@ -2,196 +2,133 @@ import streamlit as st
 import requests
 import numpy as np
 import matplotlib.pyplot as plt
+import time
 from datetime import datetime
 
-st.title("TaxiFare + 3D PCA + Text Modifier + Cellular Automata")
-
-st.markdown("""
-Taxi Fare API + vues PCA 2D/3D + modificateur texte + **automates cellulaires 1D**
-initialisés via matrices 8×8 dérivées des paramètres du trajet.
-""")
+st.title("TaxiFare + PCA + Text + Cellular Automata + Animation")
 
 # ───────────────────────────────────────────────
-# Inputs trajet
+# Inputs de base (comme avant)
 # ───────────────────────────────────────────────
 st.subheader("Paramètres du trajet")
 
 col1, col2 = st.columns(2)
 with col1:
     pickup_datetime   = st.text_input("Pickup datetime",      "2014-07-06 19:18:00")
-    pickup_longitude  = st.number_input("Pickup longitude",   value=-73.950655, step=0.0001, format="%.6f")
-    pickup_latitude   = st.number_input("Pickup latitude",    value=40.783282,  step=0.0001, format="%.6f")
+    pickup_longitude  = st.number_input("Pickup longitude",   value=-73.950655, step=0.0001)
+    pickup_latitude   = st.number_input("Pickup latitude",    value=40.783282,  step=0.0001)
 with col2:
-    dropoff_longitude = st.number_input("Dropoff longitude",  value=-73.984365, step=0.0001, format="%.6f")
-    dropoff_latitude  = st.number_input("Dropoff latitude",   value=40.769802,  step=0.0001, format="%.6f")
+    dropoff_longitude = st.number_input("Dropoff longitude",  value=-73.984365, step=0.0001)
+    dropoff_latitude  = st.number_input("Dropoff latitude",   value=40.769802,  step=0.0001)
     passenger_count   = st.number_input("Passenger count",    value=1, min_value=1, max_value=8, step=1)
 
+# ───────────────────────────────────────────────
+# Sliders d’ajustement “artistique” (influence l’initialisation et la règle)
+# ───────────────────────────────────────────────
+st.subheader("Ajustements visuels / artistiques")
+
+col_a, col_b, col_c = st.columns(3)
+with col_a:
+    animation_speed = st.slider("Vitesse animation (secondes par génération)", 0.05, 1.0, 0.15, step=0.05)
+with col_b:
+    rule_offset = st.slider("Décalage règle Wolfram (0–255)", 0, 255, 90, step=1)
+with col_c:
+    zoom_factor = st.slider("Taille affichage (multiplicateur)", 0.5, 3.0, 1.5, step=0.1)
+
 params_api = {
-    "pickup_datetime":   pickup_datetime,
-    "pickup_longitude":  pickup_longitude,
-    "pickup_latitude":   pickup_latitude,
-    "dropoff_longitude": dropoff_longitude,
-    "dropoff_latitude":  dropoff_latitude,
-    "passenger_count":   int(passenger_count),
+    "pickup_datetime": pickup_datetime,
+    "pickup_longitude": float(pickup_longitude),
+    "pickup_latitude": float(pickup_latitude),
+    "dropoff_longitude": float(dropoff_longitude),
+    "dropoff_latitude": float(dropoff_latitude),
+    "passenger_count": int(passenger_count),
 }
 
-# Texte à transformer (comme avant)
-st.subheader("Texte à transformer")
-input_text = st.text_area("Texte",
-    "Le taxi file dans la nuit new-yorkaise vers un destin incertain", height=80)
+# ───────────────────────────────────────────────
+# Fonctions utiles (automate cellulaire 1D)
+# ───────────────────────────────────────────────
+def wolfram_step(state, rule_bin):
+    n = len(state)
+    new_state = np.zeros(n, dtype=int)
+    for i in range(n):
+        l = state[(i-1) % n]
+        c = state[i]
+        r = state[(i+1) % n]
+        pattern = (l << 2) | (c << 1) | r
+        new_state[i] = int(rule_bin[7 - pattern])  # MSB first
+    return new_state
+
+def get_rule_bin(rule_num):
+    return f"{rule_num:08b}"
 
 # ───────────────────────────────────────────────
-# typical_rides + PCA manuelle (inchangé)
+# BOUTON PRINCIPAL + ANIMATION
 # ───────────────────────────────────────────────
-typical_rides = np.array([
-    [ 1.8,   8,   1,  10,   12,   0,  0.01, -0.02],
-    [ 4.2,  14,   1,  18,   18,   0,  0.03, -0.04],
-    [ 8.5,  25,   2,  32,    8,   0,  0.05, -0.07],
-    [12.0,  35,   1,  45,   22,   1,  0.08, -0.10],
-    [20.0,  55,   4,  65,    7,   0,  0.15, -0.18],
-    [ 2.5,  11,   3,  14,   14,   0,  0.02, -0.03],
-    [ 0.9,   5,   1,   7,   23,   1,  0.005,-0.01],
-    [ 3.1,  12,   2,  15,   10,   0, -0.02,  0.03],
-    [ 6.4,  20,   1,  25,   16,   0,  0.04,  0.05],
-    [15.0,  40,   3,  50,    9,   1, -0.10,  0.12],
-])
-
-def manual_pca(X, n_components=3):
-    X_c = X - np.mean(X, axis=0)
-    cov = np.cov(X_c.T)
-    eigvals, eigvecs = np.linalg.eig(cov)
-    idx = np.argsort(eigvals.real)[::-1]
-    comp = eigvecs[:, idx[:n_components]].real
-    return X_c @ comp, comp
-
-# ───────────────────────────────────────────────
-# Fonction automate cellulaire 1D (règle de Wolfram)
-# ───────────────────────────────────────────────
-def wolfram_ca_1d(initial_state, rule, steps):
-    """
-    initial_state : array 1D de 0/1 (longueur 64 ou autre)
-    rule : entier 0–255 (règle Wolfram)
-    steps : nb de générations
-    """
-    n = len(initial_state)
-    history = np.zeros((steps, n), dtype=int)
-    history[0] = initial_state
-
-    rule_bin = f"{rule:08b}"[::-1]  # LSB à MSB
-
-    for t in range(1, steps):
-        for i in range(n):
-            left   = history[t-1, (i-1) % n]
-            center = history[t-1, i]
-            right  = history[t-1, (i+1) % n]
-            pattern = (left << 2) | (center << 1) | right
-            history[t, i] = int(rule_bin[pattern])
-
-    return history
-
-# ───────────────────────────────────────────────
-# Bouton
-# ───────────────────────────────────────────────
-if st.button("Tout lancer : Prédire + Vues + Text + Automates"):
-    with st.spinner("Calcul..."):
+if st.button("Prédire + Générer + Lancer l’animation visuelle", type="primary"):
+    with st.spinner("Calcul initial + génération de l’état de départ..."):
         try:
-            # API
+            # ─── Prédiction ─────────────────────────────────────
             resp = requests.get("https://taxifare.lewagon.ai/predict", params=params_api, timeout=8)
-            resp.raise_for_status()
             fare = resp.json().get("fare", None)
             if fare is None:
-                st.error("Pas de fare")
+                st.error("Impossible de lire le prix")
                 st.stop()
 
             st.success(f"Prix estimé : **${fare:.2f}**")
 
-            # Features
+            # ─── Features pour seed ─────────────────────────────
             lon1, lat1 = pickup_longitude, pickup_latitude
             lon2, lat2 = dropoff_longitude, dropoff_latitude
-            dist_km = np.sqrt((lon2-lon1)**2 + (lat2-lat1)**2) * 111
-            duration_min = dist_km * 6 + 4
+            dist = ((lon2-lon1)**2 + (lat2-lat1)**2)**0.5 * 111
+            duration = dist * 6 + 4
 
             try:
                 dt = datetime.strptime(pickup_datetime, "%Y-%m-%d %H:%M:%S")
-                hour = dt.hour + dt.minute/60
-                is_weekend = 1 if dt.weekday() >= 5 else 0
+                hour = dt.hour + dt.minute/60.0
             except:
-                hour, is_weekend = 12.0, 0
+                hour = 12.0
 
-            d_lat = lat2 - lat1
-            d_lon = lon2 - lon1
+            seed_base = dist + fare + hour + passenger_count * 10 + (lat2-lat1)*1000 + (lon2-lon1)*1000
+            np.random.seed(int(seed_base) % 2**32)
 
-            current = np.array([dist_km, duration_min, passenger_count, fare, hour, is_weekend, d_lat, d_lon])
+            # État initial 64 cellules
+            WIDTH = 64
+            initial = np.random.randint(0, 2, WIDTH)
 
-            # PCA (pour les vues 2D/3D – on garde)
-            pcs, comp = manual_pca(typical_rides, 3)
-            mean = np.mean(typical_rides, axis=0)
-            curr_pcs = (current - mean) @ comp
+            # Règle influencée par les sliders + params
+            rule = (int(fare * 7 + dist * 11 + hour * 5) + rule_offset) % 256
+            rule_bin = get_rule_bin(rule)
 
-            colA, colB = st.columns(2)
-            with colA:
-                fig, ax = plt.subplots(figsize=(5,4))
-                ax.imshow(pcs[:,:2], aspect='auto', cmap='gray')
-                ax.set_title("PCA points 2D")
-                st.pyplot(fig)
-            with colB:
-                fig3d = plt.figure(figsize=(5,4))
-                ax3d = fig3d.add_subplot(111, projection='3d')
-                ax3d.scatter(*pcs.T, c='gray', s=20)
-                ax3d.scatter(*curr_pcs, c='red', s=120, marker='*')
-                st.pyplot(fig3d)
+            st.markdown(f"**Automate actif** — Règle Wolfram : **{rule}**  |  Vitesse : {animation_speed}s/gén")
 
-            # ─── Text modifier (simplifié ici pour place) ───
-            st.subheader("Texte transformé")
-            seed_text = int((dist_km + fare + hour) * 100) % 999999
-            np.random.seed(seed_text)
-            shift = seed_text % 26
-            transformed = ''.join(chr((ord(c) - 97 + shift) % 26 + 97) if c.islower() else c for c in input_text.lower())
-            st.code(transformed)
+            # ─── Zone d’animation ───────────────────────────────
+            placeholder = st.empty()
+            current_state = initial.copy()
 
-            # ─── AUTOMATES CELLULAIRES ────────────────────────
-            st.subheader("Automates cellulaires 1D issus des params")
-
-            # Valeurs pour générer différents seeds / règles
-            base_values = [dist_km, duration_min, passenger_count, fare, hour, d_lat*100, d_lon*100, is_weekend*50]
-            base_sum = sum(base_values)
-
-            # On va générer 4–6 automates différents
-            n_automata = 5
-            steps = 60
-            width = 64   # 8×8 aplati
-
-            fig_ca, axes = plt.subplots(1, n_automata, figsize=(4*n_automata, 5), sharey=True)
-
-            for i in range(n_automata):
-                # Différents offsets pour varier
-                offset = i * 17 + int(base_sum * (i+1)) % 10000
-                seed_float = sum(v * (i+1.3)**2 for v in base_values) + offset
-                np.random.seed(int(seed_float) % 2**32)
-
-                # Création état initial 64 bits
-                # Méthode : on prend plusieurs floats → bits via mantisse / hash simple
-                floats = np.array([dist_km*3.1, fare*7.7, hour*11.1, d_lat*99, d_lon*101]) + offset/1000
-                bits = np.unpackbits(np.array(floats.view(np.uint8)))[-width:]
-
-                # Règle Wolfram dérivée des params
-                rule = int((fare*13 + dist_km*7 + hour*5 + passenger_count*101 + offset) % 256)
-
-                # Evolution
-                evolution = wolfram_ca_1d(bits, rule, steps)
+            # On affiche ~80–120 générations (arrêt manuel possible via bouton stop)
+            MAX_GEN = 120
+            for gen in range(MAX_GEN):
+                # Mise à jour
+                current_state = wolfram_step(current_state, rule_bin)
 
                 # Affichage
-                ax = axes[i]
-                ax.imshow(evolution, cmap='binary', interpolation='nearest')
-                ax.set_title(f"Rule {rule}\nseed offset {offset%1000}")
-                ax.set_xticks([])
-                ax.set_yticks([])
+                with placeholder.container():
+                    fig, ax = plt.subplots(figsize=(10 * zoom_factor, 2.5 * zoom_factor))
+                    ax.imshow(current_state.reshape(1, -1), cmap='binary', aspect='auto')
+                    ax.set_title(f"Génération {gen+1}  |  Règle {rule}")
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                    st.pyplot(fig)
+                    st.caption(f"État actuel — gen {gen+1}/{MAX_GEN}")
 
-            st.pyplot(fig_ca)
+                time.sleep(animation_speed)
 
-            st.caption("Chaque automate = état initial 64 cellules + règle Wolfram différents → dérivés des params (dist, prix, heure, deltas…). Déterministe.")
+                # Sécurité anti-boucle infinie (Streamlit timeout)
+                if gen > MAX_GEN - 2:
+                    st.info("Animation terminée (limite atteinte). Relancez pour rejouer.")
+                    break
 
         except Exception as e:
-            st.error(f"Erreur : {str(e)}")
+            st.error(f"Problème : {str(e)}")
 
-st.caption("TaxiFare + art génératif via automates cellulaires • 2025–2026 vibe")
+st.caption("Ajustez les sliders → relancez l’animation pour voir l’impact sur la règle et la vitesse. L’état initial reste déterministe (lié aux params du trajet).")
