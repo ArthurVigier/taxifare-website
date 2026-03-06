@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 from datetime import datetime
-import difflib  # for pattern matching / closest word
+import difflib
 
 st.set_page_config(page_title="TaxiFare + Game of Life", layout="wide")
 
@@ -41,20 +41,20 @@ Cette application combine :
     "pca_3d_title": "PCA 3D",
     "transformed_title": "Texte transformé",
     "gol_title": "Game of Life 2D – Animation procédurale",
-    "fare_success": "**Prix estimé : ${fare:.2f}**",
+    "fare_success": "Prix estimé : ${fare:.2f}",
     "gol_info": "Grille {size} × {size} • Densité initiale ≈ {density:.1%}",
     "gol_gen_caption": "État à la génération {gen}",
     "gol_gen_title": "Génération {gen} / {max_gens}   –   {alive} cellules vivantes",
     "success_end": "Simulation terminée. Relancez pour une nouvelle évolution !",
     "error_no_fare": "Impossible de lire le prix depuis l'API.",
     "error_generic": "Erreur : {error}",
-    "caption": "TaxiFare + Game of Life procédural • déterministe via paramètres du trajet • 2025–2026",
+    "caption": "TaxiFare + Game of Life procédural • déterministe via paramètres du trajet • 2026",
     "button_random_info": "Get Random Information",
     "random_info_title": "Information aléatoire issue des params",
 }
 
 # ───────────────────────────────────────────────
-# État de l'application
+# État
 # ───────────────────────────────────────────────
 if "modified_mode" not in st.session_state:
     st.session_state.modified_mode = False
@@ -63,21 +63,18 @@ if "current_texts" not in st.session_state:
     st.session_state.current_texts = TEXTS_NORMAL.copy()
 
 # ───────────────────────────────────────────────
-# Fonction de transformation du texte (basée sur les règles précédentes)
+# Transformation de texte
 # ───────────────────────────────────────────────
 def transform_text(text: str) -> str:
-    if not text:
+    if not text.strip():
         return text
 
-    # Shift César basé sur longueur
     shift = (len(text) % 26) + 1
     result = []
     for idx, c in enumerate(text.lower()):
         if c.isalpha():
-            # César
             base = ord('a')
             shifted = chr((ord(c) - base + shift) % 26 + base)
-            # Substitution lettre → chiffre si condition
             if (idx + shift) % 7 == 0:
                 num = (ord(shifted) - ord('a') + 1) % 10
                 result.append(str(num))
@@ -87,8 +84,6 @@ def transform_text(text: str) -> str:
             result.append(c)
 
     s = "".join(result).upper()
-
-    # Inversion partielle de segments (tous les 5-8 chars)
     flip_freq = 5 + (len(s) % 4)
     parts = [s[i:i+flip_freq] for i in range(0, len(s), flip_freq)]
     for i in range(len(parts)):
@@ -97,7 +92,7 @@ def transform_text(text: str) -> str:
     return "".join(parts)
 
 # ───────────────────────────────────────────────
-# Boutons de contrôle (toujours visibles)
+# Boutons globaux de modification texte
 # ───────────────────────────────────────────────
 col_btn1, col_btn2 = st.columns([1, 1])
 with col_btn1:
@@ -114,13 +109,15 @@ with col_btn2:
         st.rerun()
 
 # ───────────────────────────────────────────────
-# Raccourci pour texte actuel
+# Helper texte sécurisé
 # ───────────────────────────────────────────────
 def T(key: str) -> str:
+    if not key or key.isspace():
+        return key
     return st.session_state.current_texts.get(key, key)
 
 # ───────────────────────────────────────────────
-# Données typiques pour PCA
+# PCA manuel
 # ───────────────────────────────────────────────
 typical_rides = np.array([
     [1.8, 8, 1, 10, 12, 0, 0.01, -0.02],
@@ -144,7 +141,7 @@ def manual_pca(X, n_components=3):
     return X_c @ comp, comp
 
 # ───────────────────────────────────────────────
-# Fonctions Game of Life
+# Game of Life
 # ───────────────────────────────────────────────
 def count_neighbors(grid):
     return (
@@ -161,32 +158,27 @@ def gol_step(grid):
     return ((neighbors == 3) | ((grid == 1) & (neighbors == 2))).astype(int)
 
 # ───────────────────────────────────────────────
-# Dictionnaire de mots simples pour pattern matching (peut être étendu)
+# Dictionnaire mots pour matching
 # ───────────────────────────────────────────────
 WORD_DICT = [
     "taxi", "newyork", "manhattan", "airport", "fare", "traffic", "city", "night", "passenger", "route",
     "latitude", "longitude", "time", "date", "weekend", "hour", "distance", "duration", "price", "estimate",
     "python", "streamlit", "api", "wikipedia", "random", "info", "letter", "number", "convert", "match",
-    "hello", "world", "test", "data", "code", "app", "button", "click", "fun", "art",
-    # Ajoute plus de mots si besoin, ou charge d'un fichier / lib
+    "hello", "world", "test", "data", "code", "app", "button", "click", "fun", "art", "music", "film",
+    "science", "history", "space", "earth", "planet", "star", "moon", "sun", "river", "mountain"
 ]
 
-# ───────────────────────────────────────────────
-# Fonction pour convertir chiffres en lettres
-# ───────────────────────────────────────────────
 def numbers_to_letters(numbers):
     letters = ""
     for num in numbers:
-        # Convertir en string, enlever signe et point, prendre digits
-        str_num = str(abs(num)).replace(".", "")
+        str_num = str(abs(num)).replace(".", "").replace("-", "")
         for digit in str_num:
             if digit.isdigit():
-                # 0=A, 1=B, ..., 9=J (mod 26 si plus grand, mais digits 0-9)
                 letters += chr(ord('A') + int(digit))
-    return letters.lower()  # pour matching insensible à la casse
+    return letters.lower()
 
 # ───────────────────────────────────────────────
-# Interface principale
+# Interface
 # ───────────────────────────────────────────────
 st.title(T("app_title"))
 st.markdown(T("app_desc"))
@@ -218,10 +210,10 @@ with col_d:
 st.subheader(T("section_text"))
 input_text = st.text_area(T("section_text"), T("text_placeholder"), height=100)
 
+# ─── Prédiction + viz ────────────────────────────────
 if st.button(T("button_predict"), type="primary"):
     with st.spinner("Calcul en cours..."):
         try:
-            # ─── API ─────────────────────────────────────────────
             params = {
                 "pickup_datetime": pickup_datetime,
                 "pickup_longitude": float(pickup_longitude),
@@ -230,16 +222,15 @@ if st.button(T("button_predict"), type="primary"):
                 "dropoff_latitude": float(dropoff_latitude),
                 "passenger_count": int(passenger_count),
             }
-            response = requests.get("https://taxifare.lewagon.ai/predict", params=params, timeout=9)
-            response.raise_for_status()
-            fare = response.json().get("fare")
+            r = requests.get("https://taxifare.lewagon.ai/predict", params=params, timeout=9)
+            r.raise_for_status()
+            fare = r.json().get("fare")
             if fare is None:
                 st.error(T("error_no_fare"))
                 st.stop()
 
-            st.success(T("fare_success").format(fare=fare))
+            st.success(f"**Prix estimé : ${fare:.2f}**")
 
-            # ─── Features ────────────────────────────────────────
             lon1, lat1 = pickup_longitude, pickup_latitude
             lon2, lat2 = dropoff_longitude, dropoff_latitude
             dist_km = np.hypot(lon2 - lon1, lat2 - lat1) * 111
@@ -256,11 +247,9 @@ if st.button(T("button_predict"), type="primary"):
             d_lat = lat2 - lat1
             d_lon = lon2 - lon1
 
-            # Seed déterministe
             seed_value = int(dist_km * 17 + fare * 31 + hour_frac * 13 + passenger_count * 101 + d_lat*999 + d_lon*777)
             np.random.seed(seed_value % 2**32)
 
-            # ─── PCA ─────────────────────────────────────────────
             pcs, comp = manual_pca(typical_rides)
             current_features = np.array([dist_km, duration_min, passenger_count, fare, hour_frac, is_weekend, d_lat, d_lon])
             curr_proj = (current_features - np.mean(typical_rides, axis=0)) @ comp
@@ -273,6 +262,7 @@ if st.button(T("button_predict"), type="primary"):
                 ax.legend()
                 ax.set_title(T("pca_2d_title"))
                 st.pyplot(fig)
+                plt.close(fig)
 
             with col_pca2:
                 fig3 = plt.figure(figsize=(5.5, 4.5))
@@ -281,13 +271,12 @@ if st.button(T("button_predict"), type="primary"):
                 ax3.scatter(*curr_proj[:3], c="red", s=180, marker="*")
                 ax3.set_title(T("pca_3d_title"))
                 st.pyplot(fig3)
+                plt.close(fig3)
 
-            # ─── Texte transformé ────────────────────────────────
             st.subheader(T("transformed_title"))
             transformed = transform_text(input_text)
             st.code(transformed)
 
-            # ─── Game of Life ────────────────────────────────────
             st.subheader(T("gol_title"))
 
             density = 0.14 + (fare / 120) * 0.15 + (dist_km / 60) * 0.09 + (passenger_count / 8) * 0.06
@@ -295,7 +284,6 @@ if st.button(T("button_predict"), type="primary"):
 
             grid = (np.random.rand(grid_size, grid_size) < density).astype(int)
 
-            # Ajout motif si conditions
             if passenger_count >= 4 or is_weekend:
                 cx = grid_size // 2
                 glider = np.array([[0,1,0],[0,0,1],[1,1,1]])
@@ -317,55 +305,45 @@ if st.button(T("button_predict"), type="primary"):
                     ax.axis("off")
                     st.pyplot(fig)
                     st.caption(T("gol_gen_caption").format(gen=generation))
+                    plt.close(fig)
 
                 time.sleep(anim_speed)
 
             st.success(T("success_end"))
 
         except Exception as e:
-            st.error(T("error_generic").format(error=str(e)))
+            st.error(f"Erreur : {str(e)}")
 
 # ───────────────────────────────────────────────
-# Nouveau bouton "Get Random Information"
+# Get Random Information
 # ───────────────────────────────────────────────
 if st.button(T("button_random_info")):
-    with st.spinner("Génération d'info aléatoire..."):
-        # Collecter les chiffres (long, lat, pass, dist si calculé, etc.)
-        # Note : fare et dist nécessitent la prédiction, donc on assume qu'elle a été faite ou on utilise defaults
+    with st.spinner("Recherche d'info aléatoire..."):
         numbers = [pickup_longitude, pickup_latitude, dropoff_longitude, dropoff_latitude, passenger_count]
-        # Ajoute fare si disponible
         if 'fare' in locals():
             numbers.append(fare)
         if 'dist_km' in locals():
             numbers.append(dist_km)
 
-        # Convertir en lettres
         letter_string = numbers_to_letters(numbers)
-        st.write(f"Chaîne de lettres générée : {letter_string}")
+        st.write(f"Chaîne de lettres générée : **{letter_string}**")
 
-        # Pattern matching : trouver le mot le plus proche dans WORD_DICT
-        closest = difflib.get_close_matches(letter_string, WORD_DICT, n=1, cutoff=0.3)
-        if closest:
-            query_word = closest[0]
-        else:
-            query_word = "random"  # default si pas de match
+        closest = difflib.get_close_matches(letter_string, WORD_DICT, n=1, cutoff=0.2)
+        query_word = closest[0] if closest else "taxi"
 
-        st.write(f"Mot le plus proche : {query_word}")
+        st.write(f"Mot le plus proche trouvé : **{query_word}**")
 
-        # Requête Wikipedia
-        wiki_url = f"https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&format=json&titles={query_word}"
         try:
-            resp = requests.get(wiki_url)
-            data = resp.json()
-            page = next(iter(data['query']['pages'].values()))
-            if 'extract' in page:
-                info = page['extract']
+            wiki_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{query_word}"
+            resp = requests.get(wiki_url, timeout=6)
+            if resp.status_code == 200:
+                data = resp.json()
+                info = data.get("extract", "Pas de résumé disponible.")
+                st.subheader(T("random_info_title"))
+                st.markdown(info)
             else:
-                info = "Pas d'info trouvée."
-        except:
-            info = "Erreur lors de la requête Wikipedia."
-
-        st.subheader(T("random_info_title"))
-        st.markdown(info)
+                st.info("Pas d'article trouvé pour ce mot.")
+        except Exception as e:
+            st.error(f"Erreur Wikipedia : {str(e)}")
 
 st.caption(T("caption"))
