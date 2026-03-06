@@ -4,13 +4,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 from datetime import datetime
-import difflib
-from bs4 import BeautifulSoup  # ← ajouté pour extraire du contenu
 
 st.set_page_config(page_title="TaxiFare + Game of Life", layout="wide")
 
 # ───────────────────────────────────────────────
-# Textes de base (version normale) — inchangé
+# Textes de base (version normale)
 # ───────────────────────────────────────────────
 TEXTS_NORMAL = {
     "app_title": "Prédiction Taxi + Game of Life Art",
@@ -42,20 +40,18 @@ Cette application combine :
     "pca_3d_title": "PCA 3D",
     "transformed_title": "Texte transformé",
     "gol_title": "Game of Life 2D – Animation procédurale",
-    "fare_success": "Prix estimé : ${fare:.2f}",
+    "fare_success": "**Prix estimé : ${fare:.2f}**",
     "gol_info": "Grille {size} × {size} • Densité initiale ≈ {density:.1%}",
     "gol_gen_caption": "État à la génération {gen}",
     "gol_gen_title": "Génération {gen} / {max_gens}   –   {alive} cellules vivantes",
     "success_end": "Simulation terminée. Relancez pour une nouvelle évolution !",
     "error_no_fare": "Impossible de lire le prix depuis l'API.",
     "error_generic": "Erreur : {error}",
-    "caption": "TaxiFare + Game of Life procédural • déterministe via paramètres du trajet • 2026",
-    "button_random_info": "Get Random Information",
-    "random_info_title": "Information aléatoire issue des params (première page Google organique)",
+    "caption": "TaxiFare + Game of Life procédural • déterministe via paramètres du trajet • 2025–2026",
 }
 
 # ───────────────────────────────────────────────
-# État et transformation texte (inchangé)
+# État de l'application
 # ───────────────────────────────────────────────
 if "modified_mode" not in st.session_state:
     st.session_state.modified_mode = False
@@ -63,15 +59,22 @@ if "modified_mode" not in st.session_state:
 if "current_texts" not in st.session_state:
     st.session_state.current_texts = TEXTS_NORMAL.copy()
 
+# ───────────────────────────────────────────────
+# Fonction de transformation du texte (basée sur les règles précédentes)
+# ───────────────────────────────────────────────
 def transform_text(text: str) -> str:
-    if not text.strip():
+    if not text:
         return text
+
+    # Shift César basé sur longueur
     shift = (len(text) % 26) + 1
     result = []
     for idx, c in enumerate(text.lower()):
         if c.isalpha():
+            # César
             base = ord('a')
             shifted = chr((ord(c) - base + shift) % 26 + base)
+            # Substitution lettre → chiffre si condition
             if (idx + shift) % 7 == 0:
                 num = (ord(shifted) - ord('a') + 1) % 10
                 result.append(str(num))
@@ -79,7 +82,10 @@ def transform_text(text: str) -> str:
                 result.append(shifted)
         else:
             result.append(c)
+
     s = "".join(result).upper()
+
+    # Inversion partielle de segments (tous les 5-8 chars)
     flip_freq = 5 + (len(s) % 4)
     parts = [s[i:i+flip_freq] for i in range(0, len(s), flip_freq)]
     for i in range(len(parts)):
@@ -87,6 +93,9 @@ def transform_text(text: str) -> str:
             parts[i] = parts[i][::-1]
     return "".join(parts)
 
+# ───────────────────────────────────────────────
+# Boutons de contrôle (toujours visibles)
+# ───────────────────────────────────────────────
 col_btn1, col_btn2 = st.columns([1, 1])
 with col_btn1:
     if st.button(TEXTS_NORMAL["button_modify_full"], type="primary", key="modify_full"):
@@ -101,12 +110,23 @@ with col_btn2:
         st.session_state.current_texts = TEXTS_NORMAL.copy()
         st.rerun()
 
-def T(key: str) -> str:
-    if not key or key.isspace():
-        return key
-    return st.session_state.current_texts.get(key, key)
+st.markdown(
+    """
+    <small style="color: #777; font-style: italic;">
+    • « Take & Modify Text Full » → remplace tous les titres, labels, descriptions et boutons par leur version transformée (César + substitutions + inversions)<br>
+    • « Go back to normal » → rétablit immédiatement l'interface en français standard
+    </small>
+    """,
+    unsafe_allow_html=True
+)
 # ───────────────────────────────────────────────
-# PCA manuel
+# Raccourci pour texte actuel
+# ───────────────────────────────────────────────
+def T(key: str) -> str:
+    return st.session_state.current_texts.get(key, key)
+
+# ───────────────────────────────────────────────
+# Données typiques pour PCA
 # ───────────────────────────────────────────────
 typical_rides = np.array([
     [1.8, 8, 1, 10, 12, 0, 0.01, -0.02],
@@ -130,7 +150,7 @@ def manual_pca(X, n_components=3):
     return X_c @ comp, comp
 
 # ───────────────────────────────────────────────
-# Game of Life
+# Fonctions Game of Life
 # ───────────────────────────────────────────────
 def count_neighbors(grid):
     return (
@@ -147,27 +167,7 @@ def gol_step(grid):
     return ((neighbors == 3) | ((grid == 1) & (neighbors == 2))).astype(int)
 
 # ───────────────────────────────────────────────
-# Dictionnaire mots pour matching
-# ───────────────────────────────────────────────
-WORD_DICT = [
-    "taxi", "newyork", "manhattan", "airport", "fare", "traffic", "city", "night", "passenger", "route",
-    "latitude", "longitude", "time", "date", "weekend", "hour", "distance", "duration", "price", "estimate",
-    "python", "streamlit", "api", "wikipedia", "random", "info", "letter", "number", "convert", "match",
-    "hello", "world", "test", "data", "code", "app", "button", "click", "fun", "art", "music", "film",
-    "science", "history", "space", "earth", "planet", "star", "moon", "sun", "river", "mountain"
-]
-
-def numbers_to_letters(numbers):
-    letters = ""
-    for num in numbers:
-        str_num = str(abs(num)).replace(".", "").replace("-", "")
-        for digit in str_num:
-            if digit.isdigit():
-                letters += chr(ord('A') + int(digit))
-    return letters.lower()
-
-# ───────────────────────────────────────────────
-# Interface
+# Interface principale
 # ───────────────────────────────────────────────
 st.title(T("app_title"))
 st.markdown(T("app_desc"))
@@ -199,10 +199,10 @@ with col_d:
 st.subheader(T("section_text"))
 input_text = st.text_area(T("section_text"), T("text_placeholder"), height=100)
 
-# ─── Prédiction + viz ────────────────────────────────
 if st.button(T("button_predict"), type="primary"):
     with st.spinner("Calcul en cours..."):
         try:
+            # ─── API ─────────────────────────────────────────────
             params = {
                 "pickup_datetime": pickup_datetime,
                 "pickup_longitude": float(pickup_longitude),
@@ -211,15 +211,16 @@ if st.button(T("button_predict"), type="primary"):
                 "dropoff_latitude": float(dropoff_latitude),
                 "passenger_count": int(passenger_count),
             }
-            r = requests.get("https://taxifare.lewagon.ai/predict", params=params, timeout=9)
-            r.raise_for_status()
-            fare = r.json().get("fare")
+            response = requests.get("https://taxifare.lewagon.ai/predict", params=params, timeout=9)
+            response.raise_for_status()
+            fare = response.json().get("fare")
             if fare is None:
                 st.error(T("error_no_fare"))
                 st.stop()
 
-            st.success(f"**Prix estimé : ${fare:.2f}**")
+            st.success(T("fare_success").format(fare=fare))
 
+            # ─── Features ────────────────────────────────────────
             lon1, lat1 = pickup_longitude, pickup_latitude
             lon2, lat2 = dropoff_longitude, dropoff_latitude
             dist_km = np.hypot(lon2 - lon1, lat2 - lat1) * 111
@@ -236,9 +237,11 @@ if st.button(T("button_predict"), type="primary"):
             d_lat = lat2 - lat1
             d_lon = lon2 - lon1
 
+            # Seed déterministe
             seed_value = int(dist_km * 17 + fare * 31 + hour_frac * 13 + passenger_count * 101 + d_lat*999 + d_lon*777)
             np.random.seed(seed_value % 2**32)
 
+            # ─── PCA ─────────────────────────────────────────────
             pcs, comp = manual_pca(typical_rides)
             current_features = np.array([dist_km, duration_min, passenger_count, fare, hour_frac, is_weekend, d_lat, d_lon])
             curr_proj = (current_features - np.mean(typical_rides, axis=0)) @ comp
@@ -251,7 +254,6 @@ if st.button(T("button_predict"), type="primary"):
                 ax.legend()
                 ax.set_title(T("pca_2d_title"))
                 st.pyplot(fig)
-                plt.close(fig)
 
             with col_pca2:
                 fig3 = plt.figure(figsize=(5.5, 4.5))
@@ -260,12 +262,13 @@ if st.button(T("button_predict"), type="primary"):
                 ax3.scatter(*curr_proj[:3], c="red", s=180, marker="*")
                 ax3.set_title(T("pca_3d_title"))
                 st.pyplot(fig3)
-                plt.close(fig3)
 
+            # ─── Texte transformé ────────────────────────────────
             st.subheader(T("transformed_title"))
             transformed = transform_text(input_text)
             st.code(transformed)
 
+            # ─── Game of Life ────────────────────────────────────
             st.subheader(T("gol_title"))
 
             density = 0.14 + (fare / 120) * 0.15 + (dist_km / 60) * 0.09 + (passenger_count / 8) * 0.06
@@ -273,6 +276,7 @@ if st.button(T("button_predict"), type="primary"):
 
             grid = (np.random.rand(grid_size, grid_size) < density).astype(int)
 
+            # Ajout motif si conditions
             if passenger_count >= 4 or is_weekend:
                 cx = grid_size // 2
                 glider = np.array([[0,1,0],[0,0,1],[1,1,1]])
@@ -294,122 +298,12 @@ if st.button(T("button_predict"), type="primary"):
                     ax.axis("off")
                     st.pyplot(fig)
                     st.caption(T("gol_gen_caption").format(gen=generation))
-                    plt.close(fig)
 
                 time.sleep(anim_speed)
 
             st.success(T("success_end"))
 
         except Exception as e:
-            st.error(f"Erreur : {str(e)}")
-
-# ───────────────────────────────────────────────
-# Get Random Information
-# ───────────────────────────────────────────────
-if st.button(T("button_random_info")):
-    with st.spinner("Recherche Google sur la suite de chiffres..."):
-        numbers = [
-            pickup_longitude,
-            pickup_latitude,
-            dropoff_longitude,
-            dropoff_latitude,
-            passenger_count
-        ]
-        if 'fare' in locals():
-            numbers.append(fare)
-        if 'dist_km' in locals():
-            numbers.append(dist_km)
-
-        digit_string = extract_numbers_as_string(numbers)
-        st.write(f"Suite de chiffres extraite : **{digit_string}**")
-
-        if not digit_string or len(digit_string) < 3:
-            st.warning("Pas assez de chiffres pour une recherche utile.")
-            st.stop()
-
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-
-        # ─── Fonction réutilisable pour chercher un terme et récupérer le premier lien + contenu ───
-        def search_and_extract(query):
-            google_url = f"https://www.google.com/search?q={query}"
-            try:
-                resp = requests.get(google_url, headers=headers, timeout=8)
-                resp.raise_for_status()
-                soup = BeautifulSoup(resp.text, "html.parser")
-
-                first_link = None
-                for g in soup.find_all("div", class_="g"):
-                    a_tag = g.find("a")
-                    if a_tag and "href" in a_tag.attrs:
-                        href = a_tag["href"]
-                        if href.startswith("http") and "google" not in href and "youtube" not in href:
-                            first_link = href
-                            break
-
-                if not first_link:
-                    return None, None
-
-                # Extraction contenu
-                page_resp = requests.get(first_link, headers=headers, timeout=8)
-                page_soup = BeautifulSoup(page_resp.text, "html.parser")
-
-                title = page_soup.title.string.strip() if page_soup.title else query
-                paragraphs = page_soup.find_all("p")
-                text_snippet = ""
-                for p in paragraphs:
-                    text_snippet += p.get_text(strip=True) + " "
-                    if len(text_snippet) > 1200:
-                        break
-
-                words = text_snippet.split()
-                preview = " ".join(words[:200]) + "..." if len(words) > 200 else text_snippet
-
-                return first_link, (title, preview)
-
-            except:
-                return None, None
-
-        # ─── Essai 1 : recherche avec la chaîne complète ───
-        link, content = search_and_extract(digit_string)
-        used_query = digit_string
-
-        # ─── Si rien de pertinent → division en sous-ensembles ───
-        if not link or not content:
-            st.info("Aucun résultat pertinent sur la suite complète → division en sous-ensembles...")
-
-            # Division en morceaux de 3 à 6 chiffres
-            chunk_sizes = [3, 4, 5, 6]
-            possible_chunks = []
-
-            for size in chunk_sizes:
-                for i in range(0, len(digit_string) - size + 1):
-                    chunk = digit_string[i:i+size]
-                    if len(chunk.strip("0")) >= 3:  # évite les suites de zéros
-                        possible_chunks.append(chunk)
-
-            # On prend le premier chunk viable
-            if possible_chunks:
-                chunk_query = possible_chunks[0]
-                st.write(f"Essai avec le sous-ensemble : **{chunk_query}**")
-                link, content = search_and_extract(chunk_query)
-                used_query = chunk_query
-            else:
-                st.warning("Impossible de créer un sous-ensemble exploitable.")
-                link = f"https://www.google.com/search?q={digit_string}"
-                content = (None, "Aucun contenu extrait.")
-
-        # ─── Affichage final ───
-        if link:
-            st.markdown(f"**Recherche effectuée** : [{used_query}]({link})")
-
-        if content and content[0]:
-            title, preview = content
-            st.subheader(T("random_info_title"))
-            st.markdown(f"**{title}**")
-            st.markdown(preview)
-            st.markdown(f"[Ouvrir la page complète →]({link})")
-        else:
-            st.info("Aucun contenu significatif récupéré. Essayez avec d'autres coordonnées.")
-            st.markdown(f"Lien de recherche brute : [Google →]({link})")
+            st.error(T("error_generic").format(error=str(e)))
 
 st.caption(T("caption"))
