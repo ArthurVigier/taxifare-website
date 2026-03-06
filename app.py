@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA  # Note: If sklearn not available, implement manually below
+
 from datetime import datetime
 
 st.title("TaxiFareModel Front + 3D Semantic Mapping")
