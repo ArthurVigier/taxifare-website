@@ -293,13 +293,18 @@ if st.button(T("button_predict"), type="primary"):
                 current = gol_step(current)
                 alive = np.sum(current)
 
+                fig = plt.figure(figsize=(10 * zoom_factor, 10 * zoom_factor))
+                ax = fig.add_subplot(111)
+                ax.imshow(current, cmap="binary", interpolation="nearest")
+                ax.set_title(T("gol_gen_title").format(gen=generation, max_gens=max_gens, alive=alive))
+                ax.axis("off")
+
                 with placeholder.container():
-                    fig, ax = plt.subplots(figsize=(10 * zoom_factor, 10 * zoom_factor))
-                    ax.imshow(current, cmap="binary", interpolation="nearest")
-                    ax.set_title(T("gol_gen_title").format(gen=generation, max_gens=max_gens, alive=alive))
-                    ax.axis("off")
                     st.pyplot(fig)
                     st.caption(T("gol_gen_caption").format(gen=generation))
+
+                plt.close(fig)          # ferme après affichage
+                plt.close('all')        # encore plus agressif
 
                 time.sleep(anim_speed)
 
