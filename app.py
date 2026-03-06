@@ -493,98 +493,114 @@ if st.button("Lancer les prédictions multiples + Analyses"):
                     plt.close(fig_hm)
 
 # ───────────────────────────────────────────────
-# Section : Fractale Mandelbrot centrée sur le trajet
+# Section : Fractales Mandelbrot & Julia (liées au trajet)
 # ───────────────────────────────────────────────
-# ───────────────────────────────────────────────
-# Section : Fractale Mandelbrot centrée sur une zone intéressante
-# ───────────────────────────────────────────────
-st.subheader("Fractale Mandelbrot – Le chaos inspiré du trajet")
+st.subheader("Fractales Mandelbrot & Julia – Inspirées du trajet")
 
 st.caption(
-    "Centre fixe dans une zone riche en détails (pas le gros blob noir). "
-    "Les coordonnées du trajet influencent légèrement le décalage pour garder un lien."
+    "Mandelbrot (gauche) : zoom classique fixe\n"
+    "Julia (droite) : paramètre c dérivé des coordonnées GPS"
 )
 
-col_zoom, col_iter, col_cmap = st.columns(3)
+col_zoom, col_iter = st.columns(2)
 with col_zoom:
-    zoom_level = st.slider("Niveau de zoom", 1.0, 200.0, 8.0, step=0.5)
+    zoom_level = st.slider("Niveau de zoom global", 1.0, 150.0, 10.0, step=0.5)
 with col_iter:
-    max_iter = st.slider("Itérations max", 50, 800, 120, step=20)
-with col_cmap:
-    cmap_choice = st.selectbox(
-        "Palette de couleurs",
-        ["inferno", "viridis", "plasma", "twilight_shifted", "nipy_spectral", "hot"]
+    max_iter = st.slider("Itérations max", 50, 600, 150, step=25)
+
+cmap_choice = st.selectbox(
+    "Palette",
+    ["inferno", "plasma", "viridis", "twilight_shifted", "nipy_spectral", "hot"]
+)
+
+if st.button("Générer Mandelbrot & Julia"):
+
+    width, height = 600, 600
+
+    # ─── Mandelbrot ───────────────────────────────────────────────
+    # Centre fixe dans une zone riche
+    mandel_center_real = -0.72689
+    mandel_center_imag =  0.188887
+    half_size = 1.2 / zoom_level
+
+    x_min_m = mandel_center_real - half_size
+    x_max_m = mandel_center_real + half_size
+    y_min_m = mandel_center_imag - half_size
+    y_max_m = mandel_center_imag + half_size
+
+    real_m = np.linspace(x_min_m, x_max_m, width)
+    imag_m = np.linspace(y_min_m, y_max_m, height)
+    X_m, Y_m = np.meshgrid(real_m, imag_m)
+    c_m = X_m + 1j * Y_m
+
+    z_m = np.zeros_like(c_m)
+    mandel = np.full(c_m.shape, max_iter, dtype=int)
+
+    for _ in range(max_iter):
+        mask = np.abs(z_m) <= 2
+        z_m[mask] = z_m[mask]**2 + c_m[mask]
+        mandel[~mask & (mandel == max_iter)] = _
+
+    mandel[mandel == max_iter] = 0
+
+    # ─── Julia ────────────────────────────────────────────────────
+    # Paramètre c issu des coordonnées (normalisé pour rester dans zone intéressante)
+    lon_avg = (pickup_longitude + dropoff_longitude) / 2
+    lat_avg = (pickup_latitude + dropoff_latitude) / 2
+
+    # On mappe les coordonnées GPS dans une zone où Julia est intéressante
+    c_real = -0.8 + (lon_avg + 74) / 100   # ~ -0.8 à -0.6 pour NYC
+    c_imag =  0.15 + (lat_avg - 40) / 100  # ~ 0.15 à 0.25
+
+    c_julia = complex(c_real, c_imag)
+
+    # Zone Julia (souvent plus petite que Mandelbrot)
+    half_size_j = 1.5 / zoom_level
+    x_min_j = -half_size_j
+    x_max_j =  half_size_j
+    y_min_j = -half_size_j
+    y_max_j =  half_size_j
+
+    real_j = np.linspace(x_min_j, x_max_j, width)
+    imag_j = np.linspace(y_min_j, y_max_j, height)
+    X_j, Y_j = np.meshgrid(real_j, imag_j)
+    z_j = X_j + 1j * Y_j
+
+    julia = np.full(z_j.shape, max_iter, dtype=int)
+
+    for _ in range(max_iter):
+        mask = np.abs(z_j) <= 2
+        z_j[mask] = z_j[mask]**2 + c_julia
+        julia[~mask & (julia == max_iter)] = _
+
+    julia[julia == max_iter] = 0
+
+    # ─── Affichage côte à côte ────────────────────────────────────
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.markdown("**Mandelbrot** (zoom fixe)")
+        fig_m, ax_m = plt.subplots(figsize=(6, 6))
+        ax_m.imshow(mandel, origin='lower', cmap=cmap_choice,
+                    extent=[x_min_m, x_max_m, y_min_m, y_max_m],
+                    interpolation='bicubic')
+        ax_m.set_title(f"Zoom ×{zoom_level:.1f}")
+        ax_m.axis('off')
+        st.pyplot(fig_m)
+        plt.close(fig_m)
+
+    with col_right:
+        st.markdown(f"**Julia** – c = {c_julia:.6f}")
+        fig_j, ax_j = plt.subplots(figsize=(6, 6))
+        ax_j.imshow(julia, origin='lower', cmap=cmap_choice,
+                    extent=[x_min_j, x_max_j, y_min_j, y_max_j],
+                    interpolation='bicubic')
+        ax_j.set_title(f"Zoom ×{zoom_level:.1f}")
+        ax_j.axis('off')
+        st.pyplot(fig_j)
+        plt.close(fig_j)
+
+    st.caption(
+        "Julia est plus sensible au paramètre c (ici dérivé des coordonnées GPS). "
+        "Chaque trajet produit une forme différente."
     )
-
-if st.button("Générer la fractale"):
-
-    # Centre fixe dans une zone très détaillée et esthétique
-    # Option 1 : près du "mini-elephant" (très riche)
-    center_real = -0.72689
-    center_imag =  0.188887
-
-    # Option 2 : une autre zone sympa avec beaucoup de spirales
-    # center_real = -0.745 + 0.113
-    # center_imag =  0.113
-
-    # Décalage très léger inspiré des coordonnées GPS (optionnel)
-    # center_real += (pickup_longitude + dropoff_longitude) / 10000
-    # center_imag += (pickup_latitude + dropoff_latitude) / 10000
-
-    # Taille du cadre (plus zoom élevé → cadre plus petit)
-    half_size = 1.2 / zoom_level   # 1.2 donne un bon cadrage au départ
-
-    x_min = center_real - half_size
-    x_max = center_real + half_size
-    y_min = center_imag - half_size
-    y_max = center_imag + half_size
-
-    width, height = 700, 700   # résolution confortable
-
-    with st.spinner("Calcul de la fractale (quelques secondes)..."):
-        try:
-            # Grille
-            real = np.linspace(x_min, x_max, width)
-            imag = np.linspace(y_min, y_max, height)
-            X, Y = np.meshgrid(real, imag)
-            c = X + 1j * Y
-
-            # Calcul Mandelbrot vectorisé (beaucoup plus rapide)
-            z = np.zeros_like(c)
-            mandel = np.full(c.shape, max_iter, dtype=int)
-
-            for i in range(max_iter):
-                mask = np.abs(z) <= 2
-                z[mask] = z[mask]**2 + c[mask]
-                mandel[~mask & (mandel == max_iter)] = i
-
-            # Pour les points qui n'ont pas divergé : on les met à 0 ou max_iter
-            mandel[mandel == max_iter] = 0
-
-            # Affichage
-            fig, ax = plt.subplots(figsize=(9, 9))
-            ax.imshow(
-                mandel,
-                origin='lower',
-                cmap=cmap_choice,
-                extent=[x_min, x_max, y_min, y_max],
-                interpolation='bicubic'   # rendu plus doux
-            )
-            ax.set_title(
-                f"Mandelbrot – Zoom ×{zoom_level:.1f} autour de\n"
-                f"({center_real:.6f} + {center_imag:.6f}i)"
-            )
-            ax.set_xlabel("Partie réelle")
-            ax.set_ylabel("Partie imaginaire")
-            ax.grid(False)
-
-            st.pyplot(fig)
-            plt.close(fig)
-
-            st.caption(
-                "Noir = points dans l'ensemble (stables). "
-                "Couleurs = vitesse d'échappement (plus clair = plus rapide)."
-            )
-
-        except Exception as e:
-            st.error(f"Erreur lors du calcul : {str(e)}")
