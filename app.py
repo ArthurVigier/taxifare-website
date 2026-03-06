@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 from datetime import datetime
-
+import pandas as pd
 st.set_page_config(page_title="TaxiFare + Game of Life", layout="wide")
 
 # ───────────────────────────────────────────────
