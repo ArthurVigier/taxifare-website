@@ -308,92 +308,101 @@ if st.button(T("button_predict"), type="primary"):
 
 st.caption(T("caption"))
 # ───────────────────────────────────────────────
-# Nouvelle section simplifiée : Heatmap 3D + Export
+# Section : Multi-prédictions aléatoires + Heatmap des variations
 # ───────────────────────────────────────────────
-st.subheader("Heatmap 3D du différentiel + Export simple")
+st.subheader("Multi-prédictions aléatoires + Heatmap des variations de prix")
 
-if st.button("Générer visualisation & dataset"):
+with st.expander("Hyperparamètres (contrôles)", expanded=False):
+    nb_appels = st.slider("Nombre d'appels API (max 5)", 1, 5, 3)
+    variation_lon_lat = st.slider("Variation max longitude/latitude (°)", 0.0, 0.05, 0.015, step=0.001)
+    variation_pass = st.slider("Variation max passagers", 0, 3, 1)
+    seed_aleatoire = st.number_input("Seed aléatoire (pour reproductibilité)", value=42, step=1)
 
-    try:
-        # 1. Deux sous-ensembles
-        mid = len(typical_rides) // 2
-        subset1 = typical_rides[:mid]
-        subset2 = typical_rides[mid:]
+if st.button("Lancer les prédictions multiples + Heatmap"):
 
-        # 2. Différentiel moyen par feature
-        diff_mean = np.mean(subset1, axis=0) - np.mean(subset2, axis=0)
+    if nb_appels < 1 or nb_appels > 5:
+        st.error("Le nombre d'appels doit être entre 1 et 5.")
+    else:
+        with st.spinner(f"Appels API en cours ({nb_appels} prédictions)..."):
 
-        # 3. Grille carrée fixe (16×16)
-        GRID_SIZE = 16
+            np.random.seed(seed_aleatoire)
 
-        # On étend le différentiel pour remplir une grille carrée
-        base = np.abs(diff_mean)                   # shape (8,)
-        base_repeated = np.tile(base, (GRID_SIZE // len(base) + 1))[:GRID_SIZE]  # au moins 16 valeurs
-        base_2d = np.tile(base_repeated, (GRID_SIZE, 1))                         # (16,16)
+            results = []
+            base_params = {
+                "pickup_datetime": pickup_datetime,
+                "pickup_longitude": pickup_longitude,
+                "pickup_latitude": pickup_latitude,
+                "dropoff_longitude": dropoff_longitude,
+                "dropoff_latitude": dropoff_latitude,
+                "passenger_count": int(passenger_count),
+            }
 
-        # Ajout d'un gradient simple pour plus de variété
-        gradient = np.linspace(0.4, 1.3, GRID_SIZE)
-        grid = base_2d * gradient[:, np.newaxis]
+            for i in range(nb_appels):
+                # Copie des paramètres de base
+                p = base_params.copy()
 
-        # Petit bruit
-        grid += np.random.normal(0, 0.04, grid.shape)
+                # Petites perturbations aléatoires
+                p["pickup_longitude"]  += np.random.uniform(-variation_lon_lat, variation_lon_lat)
+                p["pickup_latitude"]   += np.random.uniform(-variation_lon_lat, variation_lon_lat)
+                p["dropoff_longitude"] += np.random.uniform(-variation_lon_lat, variation_lon_lat)
+                p["dropoff_latitude"]  += np.random.uniform(-variation_lon_lat, variation_lon_lat)
+                p["passenger_count"]    = max(1, min(8, p["passenger_count"] + np.random.randint(-variation_pass, variation_pass + 1)))
 
-        # 4. Mini évolution CA (3 pas) – sur grille carrée
-        for _ in range(3):
-            # On binarise temporairement pour le CA
-            binary_grid = (grid > np.mean(grid)).astype(int)
-            neighbors = count_neighbors(binary_grid)
-            new_binary = ((neighbors == 3) | ((binary_grid == 1) & (neighbors == 2))).astype(int)
-            # On remet des valeurs continues pour la viz heatmap
-            grid = grid * 0.85 + new_binary * np.mean(grid) * 1.2
+                try:
+                    resp = requests.get("https://taxifare.lewagon.ai/predict", params=p, timeout=6)
+                    resp.raise_for_status()
+                    fare = resp.json().get("fare", None)
 
-        # 5. Heatmap 3D statique
-        fig = plt.figure(figsize=(9, 7))
-        ax = fig.add_subplot(111, projection='3d')
+                    if fare is not None:
+                        results.append({
+                            "call": i+1,
+                            "fare": fare,
+                            "passengers": p["passenger_count"],
+                            "pickup_lon": p["pickup_longitude"],
+                            "pickup_lat": p["pickup_latitude"],
+                            "dropoff_lon": p["dropoff_longitude"],
+                            "dropoff_lat": p["dropoff_latitude"],
+                        })
+                except Exception as e:
+                    st.warning(f"Appel {i+1} échoué : {str(e)}")
 
-        X, Y = np.meshgrid(np.arange(GRID_SIZE), np.arange(GRID_SIZE))
-        surf = ax.plot_surface(X, Y, grid, cmap='viridis', linewidth=0, antialiased=True)
+            if not results:
+                st.error("Aucune prédiction valide obtenue.")
+            else:
+                st.success(f"{len(results)} prédictions réussies sur {nb_appels} tentatives")
 
-        ax.set_title("Heatmap 3D – Différentiel features + mini évolution")
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_zlabel("Valeur")
-        fig.colorbar(surf, ax=ax, shrink=0.6, aspect=30)
+                # ─── Création d'une petite matrice pour heatmap ───────
+                fares = [r["fare"] for r in results]
+                if len(fares) >= 2:
+                    # On crée une matrice carrée approximative
+                    side = int(np.ceil(np.sqrt(len(fares))))
+                    pad_len = side * side - len(fares)
+                    padded_fares = fares + [np.nan] * pad_len
+                    heatmap_data = np.array(padded_fares).reshape(side, side)
 
-        st.pyplot(fig)
+                    # Heatmap simple 2D (plus fiable que 3D)
+                    fig, ax = plt.subplots(figsize=(7, 6))
+                    im = ax.imshow(heatmap_data, cmap='YlOrRd', interpolation='nearest')
+                    ax.set_title(f"Heatmap des prix prédits\n({len(fares)} valeurs – variations aléatoires)")
+                    ax.set_xlabel("Index prédiction")
+                    ax.set_ylabel("Index prédiction")
+                    plt.colorbar(im, ax=ax, label="Prix estimé ($)")
 
-        # 6. Export CSV + ZIP (inchangé, robuste)
-        import pandas as pd
-        import io
-        import zipfile
+                    # Annotations des valeurs
+                    for i in range(side):
+                        for j in range(side):
+                            val = heatmap_data[i,j]
+                            if not np.isnan(val):
+                                text = f"{val:.1f}"
+                                ax.text(j, i, text, ha="center", va="center",
+                                        color="black" if val > np.nanmean(heatmap_data)/2 else "white",
+                                        fontsize=9)
 
-        df = pd.DataFrame(
-            typical_rides,
-            columns=['dist_km', 'duration_min', 'passengers', 'fare', 'hour', 'weekend', 'delta_lat', 'delta_lon']
-        )
+                    st.pyplot(fig)
 
-        try:
-            current_row = pd.Series(current_features, index=df.columns)
-            df = pd.concat([df, current_row.to_frame().T], ignore_index=True)
-        except NameError:
-            st.info("Ligne actuelle non ajoutée (current_features non défini)")
+                    # Tableau récapitulatif
+                    df_results = pd.DataFrame(results)
+                    st.dataframe(df_results.round(4), use_container_width=True)
 
-        csv_buffer = io.StringIO()
-        df.to_csv(csv_buffer, index=False)
-        csv_data = csv_buffer.getvalue().encode('utf-8')
-
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("taxi_dataset.csv", csv_data)
-
-        zip_buffer.seek(0)
-
-        st.download_button(
-            label="Télécharger ZIP (dataset.csv)",
-            data=zip_buffer,
-            file_name="taxi_heatmap_dataset.zip",
-            mime="application/zip"
-        )
-
-    except Exception as e:
-        st.error(f"Problème dans la génération : {str(e)}")
+                else:
+                    st.info("Pas assez de résultats pour produire une heatmap significative.")
