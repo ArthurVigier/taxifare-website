@@ -315,7 +315,7 @@ st.subheader("Heatmap 3D du différentiel + Export simple")
 if st.button("Générer visualisation & dataset"):
 
     try:
-        # 1. Deux sous-ensembles simples
+        # 1. Deux sous-ensembles
         mid = len(typical_rides) // 2
         subset1 = typical_rides[:mid]
         subset2 = typical_rides[mid:]
@@ -323,33 +323,46 @@ if st.button("Générer visualisation & dataset"):
         # 2. Différentiel moyen par feature
         diff_mean = np.mean(subset1, axis=0) - np.mean(subset2, axis=0)
 
-        # 3. Grille 2D très simple pour heatmap (répétition + léger lissage)
-        grid_size = 16
-        base = np.abs(diff_mean)[:8]  # on prend les 8 premières features
-        grid = np.outer(base, np.linspace(0.3, 1.2, grid_size))
-        grid += np.random.normal(0, 0.05, grid.shape)  # micro bruit
+        # 3. Grille carrée fixe (16×16)
+        GRID_SIZE = 16
 
-        # 4. Mini évolution CA (juste 3 pas – très léger)
+        # On étend le différentiel pour remplir une grille carrée
+        base = np.abs(diff_mean)                   # shape (8,)
+        base_repeated = np.tile(base, (GRID_SIZE // len(base) + 1))[:GRID_SIZE]  # au moins 16 valeurs
+        base_2d = np.tile(base_repeated, (GRID_SIZE, 1))                         # (16,16)
+
+        # Ajout d'un gradient simple pour plus de variété
+        gradient = np.linspace(0.4, 1.3, GRID_SIZE)
+        grid = base_2d * gradient[:, np.newaxis]
+
+        # Petit bruit
+        grid += np.random.normal(0, 0.04, grid.shape)
+
+        # 4. Mini évolution CA (3 pas) – sur grille carrée
         for _ in range(3):
-            neighbors = count_neighbors(grid > np.mean(grid))
-            grid = ((neighbors == 3) | ((grid > np.mean(grid)) & (neighbors == 2))).astype(float)
+            # On binarise temporairement pour le CA
+            binary_grid = (grid > np.mean(grid)).astype(int)
+            neighbors = count_neighbors(binary_grid)
+            new_binary = ((neighbors == 3) | ((binary_grid == 1) & (neighbors == 2))).astype(int)
+            # On remet des valeurs continues pour la viz heatmap
+            grid = grid * 0.85 + new_binary * np.mean(grid) * 1.2
 
-        # 5. Heatmap 3D statique (pas d'animation pour éviter bugs)
+        # 5. Heatmap 3D statique
         fig = plt.figure(figsize=(9, 7))
         ax = fig.add_subplot(111, projection='3d')
 
-        X, Y = np.meshgrid(np.arange(grid_size), np.arange(grid_size))
-        surf = ax.plot_surface(X, Y, grid, cmap='viridis', linewidth=0, antialiased=False)
+        X, Y = np.meshgrid(np.arange(GRID_SIZE), np.arange(GRID_SIZE))
+        surf = ax.plot_surface(X, Y, grid, cmap='viridis', linewidth=0, antialiased=True)
 
-        ax.set_title("Heatmap 3D – Différentiel features + mini CA")
-        ax.set_xlabel("Dimension grille")
-        ax.set_ylabel("Dimension grille")
-        ax.set_zlabel("Valeur évoluée")
-        fig.colorbar(surf, ax=ax, shrink=0.6)
+        ax.set_title("Heatmap 3D – Différentiel features + mini évolution")
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Valeur")
+        fig.colorbar(surf, ax=ax, shrink=0.6, aspect=30)
 
         st.pyplot(fig)
 
-        # 6. Export CSV + ZIP ultra simple
+        # 6. Export CSV + ZIP (inchangé, robuste)
         import pandas as pd
         import io
         import zipfile
@@ -358,12 +371,12 @@ if st.button("Générer visualisation & dataset"):
             typical_rides,
             columns=['dist_km', 'duration_min', 'passengers', 'fare', 'hour', 'weekend', 'delta_lat', 'delta_lon']
         )
-        # Ajout de la ligne actuelle si disponible
+
         try:
             current_row = pd.Series(current_features, index=df.columns)
             df = pd.concat([df, current_row.to_frame().T], ignore_index=True)
-        except:
-            pass  # si current_features pas défini, on passe
+        except NameError:
+            st.info("Ligne actuelle non ajoutée (current_features non défini)")
 
         csv_buffer = io.StringIO()
         df.to_csv(csv_buffer, index=False)
