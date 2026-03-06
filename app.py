@@ -5,11 +5,12 @@ import matplotlib.pyplot as plt
 import time
 from datetime import datetime
 import difflib
+from bs4 import BeautifulSoup  # ← ajouté pour extraire du contenu
 
 st.set_page_config(page_title="TaxiFare + Game of Life", layout="wide")
 
 # ───────────────────────────────────────────────
-# Textes de base (version normale)
+# Textes de base (version normale) — inchangé
 # ───────────────────────────────────────────────
 TEXTS_NORMAL = {
     "app_title": "Prédiction Taxi + Game of Life Art",
@@ -50,11 +51,11 @@ Cette application combine :
     "error_generic": "Erreur : {error}",
     "caption": "TaxiFare + Game of Life procédural • déterministe via paramètres du trajet • 2026",
     "button_random_info": "Get Random Information",
-    "random_info_title": "Information aléatoire issue des params",
+    "random_info_title": "Information aléatoire issue des params (première page Google organique)",
 }
 
 # ───────────────────────────────────────────────
-# État
+# État et transformation texte (inchangé)
 # ───────────────────────────────────────────────
 if "modified_mode" not in st.session_state:
     st.session_state.modified_mode = False
@@ -62,13 +63,9 @@ if "modified_mode" not in st.session_state:
 if "current_texts" not in st.session_state:
     st.session_state.current_texts = TEXTS_NORMAL.copy()
 
-# ───────────────────────────────────────────────
-# Transformation de texte
-# ───────────────────────────────────────────────
 def transform_text(text: str) -> str:
     if not text.strip():
         return text
-
     shift = (len(text) % 26) + 1
     result = []
     for idx, c in enumerate(text.lower()):
@@ -82,7 +79,6 @@ def transform_text(text: str) -> str:
                 result.append(shifted)
         else:
             result.append(c)
-
     s = "".join(result).upper()
     flip_freq = 5 + (len(s) % 4)
     parts = [s[i:i+flip_freq] for i in range(0, len(s), flip_freq)]
@@ -91,9 +87,6 @@ def transform_text(text: str) -> str:
             parts[i] = parts[i][::-1]
     return "".join(parts)
 
-# ───────────────────────────────────────────────
-# Boutons globaux de modification texte
-# ───────────────────────────────────────────────
 col_btn1, col_btn2 = st.columns([1, 1])
 with col_btn1:
     if st.button(TEXTS_NORMAL["button_modify_full"], type="primary", key="modify_full"):
@@ -108,14 +101,10 @@ with col_btn2:
         st.session_state.current_texts = TEXTS_NORMAL.copy()
         st.rerun()
 
-# ───────────────────────────────────────────────
-# Helper texte sécurisé
-# ───────────────────────────────────────────────
 def T(key: str) -> str:
     if not key or key.isspace():
         return key
     return st.session_state.current_texts.get(key, key)
-
 # ───────────────────────────────────────────────
 # PCA manuel
 # ───────────────────────────────────────────────
@@ -318,7 +307,7 @@ if st.button(T("button_predict"), type="primary"):
 # Get Random Information
 # ───────────────────────────────────────────────
 if st.button(T("button_random_info")):
-    with st.spinner("Recherche d'info aléatoire..."):
+    with st.spinner("Recherche Google en cours..."):
         numbers = [pickup_longitude, pickup_latitude, dropoff_longitude, dropoff_latitude, passenger_count]
         if 'fare' in locals():
             numbers.append(fare)
@@ -333,17 +322,64 @@ if st.button(T("button_random_info")):
 
         st.write(f"Mot le plus proche trouvé : **{query_word}**")
 
+        # Recherche Google (User-Agent pour éviter blocage simple)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        google_url = f"https://www.google.com/search?q={query_word.replace(' ', '+')}"
+
         try:
-            wiki_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{query_word}"
-            resp = requests.get(wiki_url, timeout=6)
-            if resp.status_code == 200:
-                data = resp.json()
-                info = data.get("extract", "Pas de résumé disponible.")
+            resp = requests.get(google_url, headers=headers, timeout=8)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            # On cherche le premier lien organique (pas pub, pas "People also ask", etc.)
+            first_link = None
+            for g in soup.find_all("div", class_="g"):
+                a_tag = g.find("a")
+                if a_tag and "href" in a_tag.attrs:
+                    href = a_tag["href"]
+                    if href.startswith("http") and "google" not in href and "youtube" not in href:
+                        first_link = href
+                        break
+
+            if not first_link:
+                st.warning("Aucun résultat organique clair trouvé sur Google.")
+                first_link = "https://www.google.com/search?q=" + query_word.replace(" ", "+")
+
+            st.markdown(f"**Premier résultat organique Google** : [{query_word}]({first_link})")
+
+            # On va chercher ~200 premiers mots du contenu
+            try:
+                page_resp = requests.get(first_link, headers=headers, timeout=8)
+                page_soup = BeautifulSoup(page_resp.text, "html.parser")
+
+                # Extraction naïve : titre + meta description + premiers paragraphes
+                title = page_soup.title.string.strip() if page_soup.title else query_word
+                meta_desc = page_soup.find("meta", attrs={"name": "description"})
+                desc = meta_desc["content"].strip()[:300] if meta_desc else ""
+
+                paragraphs = page_soup.find_all("p")
+                text_snippet = ""
+                for p in paragraphs:
+                    text_snippet += p.get_text(strip=True) + " "
+                    if len(text_snippet) > 1200:
+                        break
+
+                # Limite ~200 mots
+                words = text_snippet.split()
+                preview = " ".join(words[:200]) + "..." if len(words) > 200 else text_snippet
+
                 st.subheader(T("random_info_title"))
-                st.markdown(info)
-            else:
-                st.info("Pas d'article trouvé pour ce mot.")
+                st.markdown(f"**{title}**")
+                st.markdown(f"_{desc}_" if desc else "")
+                st.markdown(preview)
+                st.markdown(f"[Lire la page complète →]({first_link})")
+
+            except Exception as e:
+                st.info(f"Impossible de lire le contenu de la page ({str(e)}). Lien direct : {first_link}")
+
         except Exception as e:
-            st.error(f"Erreur Wikipedia : {str(e)}")
+            st.error(f"Erreur lors de la recherche Google : {str(e)}")
 
 st.caption(T("caption"))
